@@ -14,6 +14,10 @@ import os
 from decimal import Decimal
 import pandas as pd
 
+import logging
+from testfixtures import LogCapture
+
+
 class TestComplexStreamLoadJob(unittestcore.BaseUnitTest):
 
     def test_klaviyo_stream(self):
@@ -209,9 +213,8 @@ class TestComplexStreamLoadJob(unittestcore.BaseUnitTest):
         try:
             test_field = bq_schemas_dict[stream][7]
         except:
-            stream = stream+"_dev"
+            stream = stream + "_dev"
             test_field = bq_schemas_dict[stream][7]
-
 
         assert test_field.name == "budget_remaining"
         assert test_field.field_type in ["NUMERIC", "DECIMAL"]  # NUMERIC is the same as DECIMAL
@@ -224,8 +227,8 @@ class TestComplexStreamLoadJob(unittestcore.BaseUnitTest):
 
         dataframe = (
             bq_client.query(query_string)
-            .result()
-            .to_dataframe()
+                .result()
+                .to_dataframe()
         )
         actual = dataframe["budget_remaining"]
         expected = pd.Series([Decimal('2450980'), Decimal('2450980'), Decimal('5000000.1'),
@@ -355,6 +358,7 @@ class TestComplexStreamLoadJob(unittestcore.BaseUnitTest):
             }
 
         """
+
         from target_bigquery import main
 
         self.set_cli_args(
@@ -371,3 +375,80 @@ class TestComplexStreamLoadJob(unittestcore.BaseUnitTest):
         print(state)
 
         self.assertEqual(ret, 0, msg="Exit code is not 0!")
+
+
+    def test_schema_error(self):
+
+        from target_bigquery import main
+
+        self.set_cli_args(
+            stdin=os.path.join(os.path.join(
+                os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tests'),
+                             'rsc'),
+                'data'), 'stream_format_record_to_schema_fails.json'),
+            config=os.path.join(
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'sandbox'),
+                'target-config.json'),
+            processhandler="load-job",
+        )
+
+        ret = main()
+
+        self.assertEqual(ret, 2, msg="Exit code is not 2!")
+
+    def test_schema_logging(self):
+
+        """
+        Test logging as part of this pull request QA: https://github.com/adswerve/target-bigquery/pull/27
+        # Feature/improve schema logging #27
+
+        About testing logging:
+        https://testfixtures.readthedocs.io/en/latest/logging.html
+        https://stackoverflow.com/questions/13733552/logger-configuration-to-log-to-file-and-print-to-stdout
+        """
+
+        from target_bigquery import main, logger
+
+        with LogCapture() as actual_logs:
+            # make sure logs are displayed during local testing in console
+            # make sure unit test logs are in the same format as what we see during the sync
+            log_formatter = logging.Formatter("%(levelname)s %(message)s")
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(log_formatter)
+            logger.addHandler(console_handler)
+
+            # set level
+            console_handler.setLevel(logging.INFO)
+
+            # test log
+            logger.info("unit test starts")
+
+            # run sync
+            self.set_cli_args(
+                stdin=os.path.join(os.path.join(
+                    os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tests'),
+                                 'rsc'),
+                    'data'), 'stream_format_record_to_schema_fails.json'),
+                config=os.path.join(
+                    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'sandbox'),
+                    'target-config.json'),
+                processhandler="load-job",
+            )
+
+            ret = main()
+
+            # verify that sync did not succeed
+            self.assertEqual(ret, 2, msg="Exit code is not 2!")
+            # test log
+            logger.info("unit test ends")
+
+            # verify logs
+            actual_logs.check_present(
+                ('root', 'INFO', "unit test starts"),
+                ('root', 'INFO',
+                 "simple_stream schema: {'properties': {'id': {'type': ['string']}, 'name': {'type': ['null', 'string']}, 'orderindex': {'type': ['null', 'integer']}, 'override_statuses': {'type': ['null', 'boolean']}, 'hidden': {'type': ['null', 'boolean']}, 'space': {'properties': {'id': {'type': ['null', 'string']}, 'name': {'type': ['null', 'string']}}, 'type': 'object'}, 'task_count': {'type': ['null', 'string', 'integer']}, 'statuses': {'items': {}, 'type': ['array', 'null']}, 'lists': {'items': {}, 'type': ['array', 'null']}, 'archived': {'type': ['null', 'boolean']}, 'permission_level': {'type': ['null', 'string']}}, 'type': 'object'}"),
+                ('root', 'CRITICAL',
+                 "Cannot format a record for stream simple_stream to its corresponding BigQuery schema. Details: {'record': {'id': '12933951', 'name': 'Milestone and Project Plan', 'orderindex': 17, 'override_statuses': 'false', 'hidden': 'false', 'space': {'id': '2577684', 'name': 'meshDelivery'}, 'task_count': '10', 'archived': 'true', 'statuses': [], 'lists': [{'id': '25670974', 'name': 'POC <customer/department>', 'orderindex': 0, 'status': 'null', 'priority': 'null', 'assignee': 'null', 'task_count': 10, 'due_date': 'null', 'start_date': 'null', 'space': {'id': '2577684', 'name': 'meshDelivery', 'access': 'true'}, 'archived': 'false', 'override_statuses': 'null', 'statuses': [{'id': 'p2577684_eDZ87cTk', 'status': 'Open', 'orderindex': 0, 'color': '#d3d3d3', 'type': 'open'}, {'id': 'p2577684_Sf8kB74x', 'status': 'planned', 'orderindex': 1, 'color': '#82CB11', 'type': 'custom'}, {'id': 'p2577684_yG5b2doG', 'status': 'in progress', 'orderindex': 2, 'color': '#4194f6', 'type': 'custom'}, {'id': 'p2577684_BZKpph7f', 'status': 'review', 'orderindex': 3, 'color': '#A875FF', 'type': 'custom'}, {'id': 'p2577684_ouoISXPV', 'status': 'Closed', 'orderindex': 4, 'color': '#6bc950', 'type': 'closed'}], 'permission_level': 'create'}], 'permission_level': 'create'}, 'schema': {'properties': {'id': {'type': ['string']}, 'name': {'type': ['null', 'string']}, 'orderindex': {'type': ['null', 'integer']}, 'override_statuses': {'type': ['null', 'boolean']}, 'hidden': {'type': ['null', 'boolean']}, 'space': {'properties': {'id': {'type': ['null', 'string']}, 'name': {'type': ['null', 'string']}}, 'type': 'object'}, 'task_count': {'type': ['null', 'string', 'integer']}, 'statuses': {'items': {}, 'type': ['array', 'null']}, 'lists': {'items': {}, 'type': ['array', 'null']}, 'archived': {'type': ['null', 'boolean']}, 'permission_level': {'type': ['null', 'string']}}, 'type': 'object'}, 'bq_schema': {'id': {'type': 'STRING', 'mode': 'REQUIRED', 'policyTags': {'names': []}}, 'name': {'type': 'STRING', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'orderindex': {'type': 'INTEGER', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'override_statuses': {'type': 'BOOLEAN', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'hidden': {'type': 'BOOLEAN', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'space': {'type': 'RECORD', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'fields': {'id': {'type': 'STRING', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'name': {'type': 'STRING', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}}}, 'task_count': {'type': 'STRING', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'statuses': {'type': 'RECORD', 'mode': 'REPEATED', 'precision': None, 'scale': None, 'fields': []}, 'lists': {'type': 'RECORD', 'mode': 'REPEATED', 'precision': None, 'scale': None, 'fields': []}, 'archived': {'type': 'BOOLEAN', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, 'permission_level': {'type': 'STRING', 'mode': 'NULLABLE', 'precision': None, 'scale': None, 'policyTags': {'names': []}}, '_time_extracted': {'type': 'timestamp', 'mode': 'NULLABLE', 'policyTags': {'names': []}}, '_time_loaded': {'type': 'timestamp', 'mode': 'NULLABLE', 'policyTags': {'names': []}}}}"),
+                ('root', 'INFO', "unit test ends")
+            )
+

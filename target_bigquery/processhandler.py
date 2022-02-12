@@ -6,9 +6,10 @@ from tempfile import TemporaryFile
 import singer
 from google.api_core import exceptions as google_exceptions
 from google.cloud import bigquery
-from google.cloud.bigquery import LoadJobConfig, CopyJobConfig
+from google.cloud.bigquery import LoadJobConfig, CopyJobConfig, QueryJobConfig
 from google.cloud.bigquery import WriteDisposition
 from google.cloud.bigquery.job import SourceFormat
+from google.cloud.exceptions import NotFound
 from jsonschema import validate
 
 from target_bigquery.encoders import DecimalEncoder
@@ -32,6 +33,7 @@ class BaseProcessHandler(object):
 
         # LoadJobProcessHandler kwargs
         self.truncate = kwargs.get("truncate", False)
+        self.incremental = kwargs.get("incremental", False)
         self.add_metadata_columns = kwargs.get("add_metadata_columns", True)
         self.validate_records = kwargs.get("validate_records", True)
         self.table_configs = kwargs.get("table_configs", {}) or {}
@@ -93,6 +95,8 @@ class BaseProcessHandler(object):
                               force_fields=self.table_configs.get(msg.stream, {}).get("force_fields", {}))
         self.bq_schema_dicts[msg.stream] = self._build_bq_schema_dict(schema)
         self.bq_schemas[msg.stream] = schema
+
+        self.logger.info(f"{msg.stream} BigQuery schema {schema}")
 
         yield from ()
 
@@ -174,9 +178,15 @@ class LoadJobProcessHandler(BaseProcessHandler):
             raise Exception(f"A record for stream {msg.stream} was encountered before a corresponding schema")
 
         schema = self.schemas[stream]
-
+        bq_schema = self.bq_schema_dicts[stream]
         nr = cleanup_record(schema, msg.record)
-        nr = format_record_to_schema(nr, self.bq_schema_dicts[stream])
+
+        try:
+            nr = format_record_to_schema(nr, self.bq_schema_dicts[stream])
+        except Exception as e:
+            extra={"record" : msg.record, "schema": schema, "bq_schema": bq_schema}
+            self.logger.critical(f"Cannot format a record for stream {msg.stream} to its corresponding BigQuery schema. Details: {extra}")
+            raise e
 
         # schema validation may fail if data doesn't match schema in terms of data types
         # in this case, we validate schema again on data which has been forced to match schema
@@ -208,6 +218,15 @@ class LoadJobProcessHandler(BaseProcessHandler):
         self._do_temp_table_based_load(self.rows)
         yield self.STATE
 
+    def primary_key_condition(self, stream):
+        self.logger.info(f"Primary keys: {', '.join(self.key_properties[stream])}")
+        keys = [f"t.{k}=s.{k}" for k in self.key_properties[stream]]
+        if len(keys) < 1:
+            raise Exception(f"No primary keys specified from the tap and Incremental option selected")
+        return " and ".join(keys)
+    #TODO: test it with multiple ids (an array of ids, if there are multiple key_properties in JSON schema)
+    #TODO: test it with dupe ids in the data
+
     def _do_temp_table_based_load(self, rows):
         assert isinstance(rows, dict)
 
@@ -231,22 +250,66 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 loaded_tmp_tables.append((stream, tmp_table_name))
 
             # copy tables to production tables
+            # destination table can have dupe ids used in MERGE statement
+            # new data which being appended should have no dupes
+
+            # if new data has dupes, then MERGE will fail with a similar error:
+            # INFO Primary keys: id
+            # CRITICAL 400 UPDATE/MERGE must match at most one source row for each target row
+
+            # https://stackoverflow.com/questions/50504504/bigquery-error-update-merge-must-match-at-most-one-source-row-for-each-target-r
+            # https://cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax
+
+            # If a row in the table to be updated joins with more than one row from the FROM clause,
+            # then the query generates the following runtime error: UPDATE/MERGE must match at most one source row for each target row.
             for stream, tmp_table_name in loaded_tmp_tables:
-                truncate = self.truncate if stream not in self.partially_loaded_streams else False
+                incremental_success = False
+                if self.incremental:
+                    self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
+                    self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
+                    table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
+                    try:
+                        self.client.get_table(table_id)
+                        column_names = [x.name for x in self.bq_schemas[stream]]
 
-                copy_config = CopyJobConfig()
-                if truncate:
-                    copy_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
-                    self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FULL_TABLE")
-                else:
-                    copy_config.write_disposition = WriteDisposition.WRITE_APPEND
-                    self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by APPEND")
+                        query ="""MERGE `{table}` t
+                            USING `{temp_table}` s
+                            ON {primary_key_condition}
+                            WHEN MATCHED THEN
+                                UPDATE SET {set_values}
+                            WHEN NOT MATCHED THEN
+                                INSERT ({new_cols}) VALUES ({cols})
+                            """.format(table=table_id,
+                                       temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
+                                       primary_key_condition=self.primary_key_condition(stream),
+                                       set_values=', '.join(f'{c}=s.{c}' for c in column_names),
+                                       new_cols=', '.join(column_names),
+                                       cols=', '.join(f's.{c}' for c in column_names))
 
-                self.client.copy_table(
-                    sources=self.dataset.table(tmp_table_name),
-                    destination=self.dataset.table(self.tables[stream]),
-                    job_config=copy_config
-                ).result()
+                        job_config = QueryJobConfig()
+                        query_job = self.client.query(query, job_config=job_config)
+                        query_job.result()
+                        self.logger.info(f'LOADED {query_job.num_dml_affected_rows} rows')
+                        incremental_success = True
+
+                    except NotFound:
+                        self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
+                        self.truncate = True
+                if not incremental_success:
+                    truncate = self.truncate if stream not in self.partially_loaded_streams else False
+                    copy_config = CopyJobConfig()
+                    if truncate:
+                        copy_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
+                        self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FULL_TABLE")
+                    else:
+                        copy_config.write_disposition = WriteDisposition.WRITE_APPEND
+                        self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by APPEND")
+
+                    self.client.copy_table(
+                        sources=self.dataset.table(tmp_table_name),
+                        destination=self.dataset.table(self.tables[stream]),
+                        job_config=copy_config
+                    ).result()
 
                 self.partially_loaded_streams.add(stream)
                 self.rows[stream].close()  # erase the file

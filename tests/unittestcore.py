@@ -40,6 +40,10 @@ class BaseUnitTest(unittest.TestCase):
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'sandbox'),
             'target_config_merge_state_false_flag.json')
 
+        os.environ["TARGET_CONFIG_INCREMENTAL"] = os.path.join(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'sandbox'),
+            'target_config_incremental.json')
+
         # TODO: make naming convention of target config files consistent "_" vs "-". Use "_" as it's easier to copy with a click
         # I think we would just need to rename target-config.json to target_config.json (also update it in README)
         self.client = None

@@ -60,10 +60,13 @@ def main():
         with open(flags.state) as f:
             state = json.load(f)
 
-    # determine replication method: append vs. truncate
+    # determine replication method: append, truncate or incremental
     truncate = False
+    incremental = False
     if config.get("replication_method", "append").lower() == "truncate":
         truncate = True
+    elif config.get("replication_method", "append").lower() == "incremental":
+        incremental = True
 
     # arguments supplied in target config
     table_prefix = config.get("table_prefix", "")
@@ -117,6 +120,7 @@ def main():
             dataset=dataset,
             location=location,
             truncate=truncate,
+            incremental=incremental,
             validate_records=validate_records,
             table_prefix=table_prefix,
             table_suffix=table_suffix,
