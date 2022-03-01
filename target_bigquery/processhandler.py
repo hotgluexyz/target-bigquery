@@ -295,6 +295,44 @@ class LoadJobProcessHandler(BaseProcessHandler):
                     except NotFound:
                         self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
                         self.truncate = True
+
+                    except Exception as e:
+                        if "Unrecognized name: _time_" not in str(e):
+                            raise
+                        else:
+                            # Add the missing fields
+                            query ="""ALTER TABLE `{table}`
+                                ADD COLUMN IF NOT EXISTS _time_extracted TIMESTAMP,
+                                ADD COLUMN IF NOT EXISTS _time_loaded TIMESTAMP;
+                            """.format(table=table_id)
+                            job_config = QueryJobConfig()
+                            query_job = self.client.query(query, job_config=job_config)
+                            query_job.result()
+
+                            # Run merge again
+                            self.client.get_table(table_id)
+                            column_names = [x.name for x in self.bq_schemas[stream]]
+
+                            query ="""MERGE `{table}` t
+                                USING `{temp_table}` s
+                                ON {primary_key_condition}
+                                WHEN MATCHED THEN
+                                    UPDATE SET {set_values}
+                                WHEN NOT MATCHED THEN
+                                    INSERT ({new_cols}) VALUES ({cols})
+                                """.format(table=table_id,
+                                        temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
+                                        primary_key_condition=self.primary_key_condition(stream),
+                                        set_values=', '.join(f'{c}=s.{c}' for c in column_names),
+                                        new_cols=', '.join(column_names),
+                                        cols=', '.join(f's.{c}' for c in column_names))
+
+                            job_config = QueryJobConfig()
+                            query_job = self.client.query(query, job_config=job_config)
+                            query_job.result()
+                            self.logger.info(f'LOADED {query_job.num_dml_affected_rows} rows')
+                            incremental_success = True
+
                 if not incremental_success:
                     truncate = self.truncate if stream not in self.partially_loaded_streams else False
                     copy_config = CopyJobConfig()
