@@ -387,6 +387,13 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
     return schema_bigquery
 
 
+def numeric_converter(value):
+    if "inf" in value:
+        return value
+    else:
+        return float(value)
+
+
 def format_record_to_schema(record, bq_schema):
     """
     Purpose:
@@ -407,9 +414,9 @@ def format_record_to_schema(record, bq_schema):
                        "TIMESTAMP": str,
                        "DATE": str,
                        "DATETIME": str,
-                       "FLOAT": float,
-                       "NUMERIC": float,
-                       "BIGNUMERIC": float,
+                       "FLOAT": numeric_converter,
+                       "NUMERIC": numeric_converter,
+                       "BIGNUMERIC": numeric_converter,
                        "INTEGER": int,
                        "BOOLEAN": bool,
                        "GEOGRAPHY": str,
