@@ -388,7 +388,7 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
 
 
 def numeric_converter(value):
-    if "inf" in value:
+    if "inf" in str(value):
         return value
     else:
         return float(value)
