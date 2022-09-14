@@ -7,6 +7,7 @@ from target_bigquery.simplify_json_schema import BQ_DECIMAL_SCALE_MAX, BQ_BIGDEC
     BQ_DECIMAL_MAX_PRECISION_INCREMENT, BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
 
 from google.cloud.bigquery import SchemaField
+from pendulum import parse
 
 METADATA_FIELDS = {
     "_time_extracted": {"type": ["null", "string"], "format": "date-time", "bq_type": "timestamp"},
@@ -390,8 +391,23 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
 def numeric_converter(value):
     if "inf" in str(value):
         return value
-    else:
+    elif value!="":
         return float(value)
+
+def integer_converter(value):
+    if value!="":
+        return int(value)
+
+def bool_converter(value):
+    if value!="":
+        return bool(value)
+
+def datetime_converter(value):
+    try:
+        parse(value)
+        return str(value)
+    except:
+        return
 
 
 def format_record_to_schema(record, bq_schema):
@@ -411,14 +427,14 @@ def format_record_to_schema(record, bq_schema):
     conversion_dict = {"BYTES": bytes,
                        "STRING": str,
                        "TIME": str,
-                       "TIMESTAMP": str,
-                       "DATE": str,
-                       "DATETIME": str,
+                       "TIMESTAMP": datetime_converter,
+                       "DATE": datetime_converter,
+                       "DATETIME": datetime_converter,
                        "FLOAT": numeric_converter,
                        "NUMERIC": numeric_converter,
                        "BIGNUMERIC": numeric_converter,
-                       "INTEGER": int,
-                       "BOOLEAN": bool,
+                       "INTEGER": integer_converter,
+                       "BOOLEAN": bool_converter,
                        "GEOGRAPHY": str,
                        "DECIMAL": str,
                        "BIGDECIMAL": str
