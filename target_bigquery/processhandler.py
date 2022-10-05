@@ -297,14 +297,12 @@ class LoadJobProcessHandler(BaseProcessHandler):
                         self.truncate = True
 
                     except Exception as e:
-                        if "Unrecognized name: _time_" not in str(e):
-                            raise
-                        else:
+                        if "Unrecognized name: " in str(e):
                             # Add the missing fields
+                            insert_cols = ", ".join(f"ADD COLUMN IF NOT EXISTS {x.name} {x.field_type}" for x in self.bq_schemas[stream])
                             query ="""ALTER TABLE `{table}`
-                                ADD COLUMN IF NOT EXISTS _time_extracted TIMESTAMP,
-                                ADD COLUMN IF NOT EXISTS _time_loaded TIMESTAMP;
-                            """.format(table=table_id)
+                                {insert_cols};
+                            """.format(table=table_id, insert_cols=insert_cols)
                             job_config = QueryJobConfig()
                             query_job = self.client.query(query, job_config=job_config)
                             query_job.result()
@@ -332,6 +330,8 @@ class LoadJobProcessHandler(BaseProcessHandler):
                             query_job.result()
                             self.logger.info(f'LOADED {query_job.num_dml_affected_rows} rows')
                             incremental_success = True
+                        else:
+                            raise
 
                 if not incremental_success:
                     truncate = self.truncate if stream not in self.partially_loaded_streams else False
