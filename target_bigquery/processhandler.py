@@ -138,6 +138,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         # self.STATE = State(**self.INIT_STATE)
         self.STATE_HANDLER = kwargs.get("state_handler")
         self.STATE = self.STATE_HANDLER(**self.INIT_STATE)
+        self.created_missing = False
 
         self.bq_schema_dicts = {}
         self.rows = {}
@@ -218,6 +219,16 @@ class LoadJobProcessHandler(BaseProcessHandler):
         self._do_temp_table_based_load(self.rows)
         yield self.STATE
 
+    def create_missing_columns(self, stream):
+        table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
+        insert_cols = ", ".join(f"ADD COLUMN IF NOT EXISTS {x.name} {x.field_type}" for x in self.bq_schemas[stream])
+        query ="""ALTER TABLE `{table}`
+            {insert_cols};
+        """.format(table=table_id, insert_cols=insert_cols)
+        job_config = QueryJobConfig()
+        query_job = self.client.query(query, job_config=job_config)
+        query_job.result()
+
     def primary_key_condition(self, stream):
         self.logger.info(f"Primary keys: {', '.join(self.key_properties[stream])}")
         keys = [f"t.{k}=s.{k}" for k in self.key_properties[stream]]
@@ -296,43 +307,6 @@ class LoadJobProcessHandler(BaseProcessHandler):
                         self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
                         self.truncate = True
 
-                    except Exception as e:
-                        if "Unrecognized name: " in str(e):
-                            # Add the missing fields
-                            insert_cols = ", ".join(f"ADD COLUMN IF NOT EXISTS {x.name} {x.field_type}" for x in self.bq_schemas[stream])
-                            query ="""ALTER TABLE `{table}`
-                                {insert_cols};
-                            """.format(table=table_id, insert_cols=insert_cols)
-                            job_config = QueryJobConfig()
-                            query_job = self.client.query(query, job_config=job_config)
-                            query_job.result()
-
-                            # Run merge again
-                            self.client.get_table(table_id)
-                            column_names = [x.name for x in self.bq_schemas[stream]]
-
-                            query ="""MERGE `{table}` t
-                                USING `{temp_table}` s
-                                ON {primary_key_condition}
-                                WHEN MATCHED THEN
-                                    UPDATE SET {set_values}
-                                WHEN NOT MATCHED THEN
-                                    INSERT ({new_cols}) VALUES ({cols})
-                                """.format(table=table_id,
-                                        temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
-                                        primary_key_condition=self.primary_key_condition(stream),
-                                        set_values=', '.join(f'{c}=s.{c}' for c in column_names),
-                                        new_cols=', '.join(column_names),
-                                        cols=', '.join(f's.{c}' for c in column_names))
-
-                            job_config = QueryJobConfig()
-                            query_job = self.client.query(query, job_config=job_config)
-                            query_job.result()
-                            self.logger.info(f'LOADED {query_job.num_dml_affected_rows} rows')
-                            incremental_success = True
-                        else:
-                            raise
-
                 if not incremental_success:
                     truncate = self.truncate if stream not in self.partially_loaded_streams else False
                     copy_config = CopyJobConfig()
@@ -353,8 +327,15 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.rows[stream].close()  # erase the file
                 self.rows[stream] = TemporaryFile(mode="w+b")
 
-        except Exception as e:
-            raise e
+        except Exception as err:
+            if self.created_missing:
+                raise err
+            if "Unrecognized name: " in str(err) or "Provided Schema does not match Table" in str(err):
+                for stream in self.rows:
+                    self.logger.info(f"Missing collumns, creating it and retrying")
+                    self.create_missing_columns(stream)
+                    self.created_missing = True
+                    self._do_temp_table_based_load(rows)
 
         finally:  # delete temp tables
             for stream, tmp_table_name in loaded_tmp_tables:
