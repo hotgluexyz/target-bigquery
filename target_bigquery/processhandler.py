@@ -221,13 +221,15 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
     def create_missing_columns(self, stream):
         table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
-        insert_cols = ", ".join(f"ADD COLUMN IF NOT EXISTS {x.name} {x.field_type}" for x in self.bq_schemas[stream])
-        query ="""ALTER TABLE `{table}`
-            {insert_cols};
-        """.format(table=table_id, insert_cols=insert_cols)
-        job_config = QueryJobConfig()
-        query_job = self.client.query(query, job_config=job_config)
-        query_job.result()
+        table = self.client.get_table(table_id)
+        original_schema = table.schema
+        new_schema = original_schema[:]
+
+        for column in self.bq_schemas[stream]:
+            if column not in new_schema:
+                new_schema.append(column)
+        table.schema = new_schema
+        table = self.client.update_table(table, ["schema"])
 
     def primary_key_condition(self, stream):
         self.logger.info(f"Primary keys: {', '.join(self.key_properties[stream])}")
