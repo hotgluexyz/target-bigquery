@@ -138,7 +138,6 @@ class LoadJobProcessHandler(BaseProcessHandler):
         # self.STATE = State(**self.INIT_STATE)
         self.STATE_HANDLER = kwargs.get("state_handler")
         self.STATE = self.STATE_HANDLER(**self.INIT_STATE)
-        self.created_missing = False
 
         self.bq_schema_dicts = {}
         self.rows = {}
@@ -221,15 +220,24 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
     def create_missing_columns(self, stream):
         table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
-        table = self.client.get_table(table_id)
+        
+        try:
+            table = self.client.get_table(table_id)
+        except NotFound:
+            return None
+
         original_schema = table.schema
         new_schema = original_schema[:]
 
+        new_columns = []
         for column in self.bq_schemas[stream]:
             if column not in new_schema:
+                new_columns.append(column.name)
+                self.logger.info(f"Column {column.name} missing in table {self.tables[stream]}, creating it...")
                 new_schema.append(column)
-        table.schema = new_schema
-        table = self.client.update_table(table, ["schema"])
+        if new_columns:
+            table.schema = new_schema
+            table = self.client.update_table(table, ["schema"])
 
     def primary_key_condition(self, stream):
         self.logger.info(f"Primary keys: {', '.join(self.key_properties[stream])}")
@@ -276,6 +284,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
             # If a row in the table to be updated joins with more than one row from the FROM clause,
             # then the query generates the following runtime error: UPDATE/MERGE must match at most one source row for each target row.
             for stream, tmp_table_name in loaded_tmp_tables:
+                self.create_missing_columns(stream)
                 incremental_success = False
                 if self.incremental:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
@@ -330,14 +339,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.rows[stream] = TemporaryFile(mode="w+b")
 
         except Exception as err:
-            if self.created_missing:
-                raise err
-            if "Unrecognized name: " in str(err) or "Provided Schema does not match Table" in str(err):
-                for stream in self.rows:
-                    self.logger.info(f"Missing collumns, creating it and retrying")
-                    self.create_missing_columns(stream)
-                    self.created_missing = True
-                    self._do_temp_table_based_load(rows)
+            raise err
 
         finally:  # delete temp tables
             for stream, tmp_table_name in loaded_tmp_tables:
