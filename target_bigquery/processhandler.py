@@ -231,7 +231,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
         new_columns = []
         for column in self.bq_schemas[stream]:
-            if column not in new_schema:
+            if column.name not in [n.name for n in new_schema]:
                 new_columns.append(column.name)
                 self.logger.info(f"Column {column.name} missing in table {self.tables[stream]}, creating it...")
                 new_schema.append(column)
