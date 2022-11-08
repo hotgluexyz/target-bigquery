@@ -237,7 +237,10 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 new_schema.append(column)
         if new_columns:
             table.schema = new_schema
-            table = self.client.update_table(table, ["schema"])
+            try:
+                table = self.client.update_table(table, ["schema"])
+            except:
+                self.logger.info(f"Error creating {column.name} in {self.tables[stream]}")
 
     def primary_key_condition(self, stream):
         self.logger.info(f"Primary keys: {', '.join(self.key_properties[stream])}")
