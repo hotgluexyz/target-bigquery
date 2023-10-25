@@ -34,6 +34,7 @@ class BaseProcessHandler(object):
         # LoadJobProcessHandler kwargs
         self.truncate = kwargs.get("truncate", False)
         self.incremental = kwargs.get("incremental", False)
+        self.append = kwargs.get("append", False)
         self.add_metadata_columns = kwargs.get("add_metadata_columns", True)
         self.validate_records = kwargs.get("validate_records", True)
         self.table_configs = kwargs.get("table_configs", {}) or {}
@@ -220,7 +221,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
     def create_missing_columns(self, stream):
         table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
-        
+
         try:
             table = self.client.get_table(table_id)
         except NotFound:
@@ -289,7 +290,13 @@ class LoadJobProcessHandler(BaseProcessHandler):
             for stream, tmp_table_name in loaded_tmp_tables:
                 self.create_missing_columns(stream)
                 incremental_success = False
-                if self.incremental:
+                truncate = self.truncate if stream not in self.partially_loaded_streams else False
+                truncate = truncate or self.table_configs.get(stream, {}).get("truncate_table", False)
+                append = self.append
+                append = append or self.table_configs.get(stream, {}).get("append_table", False)
+                incremental = self.incremental
+                incremental = incremental or self.table_configs.get(stream, {}).get("increment_table", False)
+                if not append and not truncate:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
                     self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
                     table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
@@ -322,7 +329,6 @@ class LoadJobProcessHandler(BaseProcessHandler):
                         self.truncate = True
 
                 if not incremental_success:
-                    truncate = self.truncate if stream not in self.partially_loaded_streams else False
                     copy_config = CopyJobConfig()
                     if truncate:
                         copy_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
@@ -373,6 +379,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         logger = self.logger
         partition_field = table_config.get("partition_field", None)
         cluster_fields = table_config.get("cluster_fields", None)
+        truncate_table = table_config.get("truncate_table", False)
         force_fields = table_config.get("force_fields", {})
 
         # schema_simplified = simplify(table_schema)
@@ -381,7 +388,6 @@ class LoadJobProcessHandler(BaseProcessHandler):
         load_config = LoadJobConfig()
         load_config.ignore_unknown_values = True
         load_config.schema = table_schema
-
         # partitioning
         if partition_field:
             load_config.time_partitioning = bigquery.table.TimePartitioning(
@@ -396,7 +402,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         load_config.source_format = SourceFormat.NEWLINE_DELIMITED_JSON
 
         # either truncate or append
-        if truncate:
+        if truncate or truncate_table:
             logger.info(f"Load {table_name} by FULL_TABLE (truncate)")
             load_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
         else:

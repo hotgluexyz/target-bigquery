@@ -48,11 +48,14 @@ def main():
         config = json.load(f)
 
     # target tables config (e.g, partitioning and clustering)
-    table_config = flags.tables or config.get("table_config")
+    table_config = flags.tables or config.get("table_config", {})
     tables = {}
-    if table_config:
+
+    if table_config and isinstance(table_config, str):
         with open(table_config) as f:
             tables = json.load(f)
+    else:
+        tables = table_config
 
     # state
     state = None
@@ -63,9 +66,12 @@ def main():
     # determine replication method: append, truncate or incremental
     truncate = False
     incremental = False
-    if config.get("replication_method", "append").lower() == "truncate":
+    append = False
+    if config.get("replication_method", "incremental").lower() == "truncate":
         truncate = True
-    elif config.get("replication_method", "append").lower() == "incremental":
+    elif config.get("replication_method", "incremental").lower() == "append":
+        append = True
+    else:
         incremental = True
 
     # arguments supplied in target config
@@ -120,6 +126,7 @@ def main():
             dataset=dataset,
             location=location,
             truncate=truncate,
+            append=append,
             incremental=incremental,
             validate_records=validate_records,
             table_prefix=table_prefix,

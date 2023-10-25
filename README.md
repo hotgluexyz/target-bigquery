@@ -37,7 +37,7 @@ Install requirements, using either of the two methods below.
 **Method 1**
 
 ```
-pip install -r requirements.txt 
+pip install -r requirements.txt
 ```
 
 **Method 2**
@@ -153,7 +153,7 @@ sample [target-config.json](/sample_config/target-config-exchange-rates-api.json
     * `truncate`: Deleting all previous rows and uploading the new ones to the table
     * `incremental`: **Upserting** new rows into the table, using the **primary key** given by the tap connector
       (if it finds an old row with same key, updates it. Otherwise it inserts the new row)
- - WARNING: We do not recommend using `incremental` option (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data. 
+ - WARNING: We do not recommend using `incremental` option (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data.
 
 Sample **target-config.json** file:
 
@@ -226,8 +226,8 @@ cd "{your project root directory}"
 
 # upgrade pip
 # Windows:
-py -m pip install --upgrade pip 
-# Linux: 
+py -m pip install --upgrade pip
+# Linux:
 # python3 -m pip install --upgrade pip
 
 # create a virtual env for tap
@@ -236,12 +236,12 @@ py -m venv tap
 # Linux:
 # python3 -m venv /pyenv/tap
 
-# activate the virtual env and install tap 
+# activate the virtual env and install tap
 # Windows:
 .\tap\Scripts\activate && pip install tap-exchangeratesapi==0.1.1
 
 # create a virtual env for target
-# Windows: 
+# Windows:
 py -m venv target
 # Linux:
 # python3 -m venv /pyenv/target
@@ -254,7 +254,7 @@ py -m venv target
 {project_root_dir}\tap\Scripts\tap-exchangeratesapi --config sample_config/tap-config-exchange-rates-api.json | ^
 {project_root_dir}\target\Scripts\target-bigquery --config  sample_config/target-config-exchange-rates-api.json > sample_config/state.json
 # if directory has spaces, you can use quotes:
-# "{project root dir with spaces}\tap\Scripts\tap-exchangeratesapi" 
+# "{project root dir with spaces}\tap\Scripts\tap-exchangeratesapi"
 # ^ on a Windows machine indicates a new line. On a Mac, use "\\".
 ```
 
@@ -322,7 +322,7 @@ To configure partitioning and clustering in BigQuery destination tables, we crea
     "streams": {
       "charges": {
         "partition_field": "updated_at",
-        "cluster_fields": ["type", "status", "customer_id", "transaction_id"]
+        "cluster_fields": ["type", "status", "customer_id", "transaction_id"],
       }
     }
 }
@@ -425,6 +425,36 @@ You can only set up partitioning.
 }
 ```
 
+### Forcing table truncate/append
+
+By default, this target treats every data.singer as an incremental upsert to Bigquery, however
+we know you might need to append or truncate table to the server as well.
+
+In order to configure this, you can add to your **table-config.json** or to your **config.json** the following:
+
+```
+{
+  "streams": {
+    "table_name": {
+      "truncate_table": true # or
+      "append_table": true
+    }
+  }
+}
+```
+
+On config.json:
+```
+    "table_config": {
+        "streams": {
+            "table_name": {
+                "truncate_table": true # or
+                "append_table": true
+            }
+        }
+    }
+```
+
 ## Unit tests set up
 
 Add the following files to *sandbox* directory under project root directory:
@@ -465,19 +495,19 @@ Add the following files to *sandbox* directory under project root directory:
     "project_id": "{your-project-id}",
     "dataset_id": "{your_dataset_id}",
     "max_cache": 0
-  }    
+  }
   ```
 
 - **target_config_contains_target_tables_config.json**
 
     - if you're running unit test from the unit test .py file:
 
-      ``` 
+      ```
       {
         "project_id": "{your-project-id}",
         "dataset_id": "{your_dataset_id}",
         "table_config": "rsc/config/simple_stream_table_config.json"
-      }      
+      }
       ```
 
     - if you're running unit test from shell, for example:
@@ -487,13 +517,13 @@ Add the following files to *sandbox* directory under project root directory:
       ```
 
       In this case, here's your config file, notice the difference in directory:
-      ``` 
+      ```
       {
         "project_id": "{your-project-id}",
         "dataset_id": "{your_dataset_id}",
         "table_config": "tests/rsc/config/simple_stream_table_config.json"
       }
-      ``` 
+      ```
 
 - **malformed_target_config.json**:
 
@@ -502,7 +532,7 @@ Add the following files to *sandbox* directory under project root directory:
     "project_id": "{your-project-id}",
     "dataset_id": "{your_dataset_id}",
     "validate_records":  false
-  }     
+  }
     ```
 
 - **target_config_merge_state_false_flag.json**:
@@ -511,7 +541,7 @@ Add the following files to *sandbox* directory under project root directory:
     "project_id": "{your-project-id}",
     "dataset_id": "{your_dataset_id}",
     "merge_state_messages": 0
-  }     
+  }
     ```
 
 - **target_config_incremental.json**:
