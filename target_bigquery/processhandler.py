@@ -220,7 +220,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
     def create_missing_columns(self, stream):
         table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
-        
+
         try:
             table = self.client.get_table(table_id)
         except NotFound:
@@ -289,6 +289,12 @@ class LoadJobProcessHandler(BaseProcessHandler):
             for stream, tmp_table_name in loaded_tmp_tables:
                 self.create_missing_columns(stream)
                 incremental_success = False
+                truncate_stream = self.table_configs.get(stream, {}).get("truncate", False)
+                if truncate_stream:
+                    self.logger.info(f"Truncating dataset: {stream}")
+
+                self.truncate = self.truncate or truncate_stream
+                self.incremental = self.incremental if not self.truncate else False
                 if self.incremental:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
                     self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
