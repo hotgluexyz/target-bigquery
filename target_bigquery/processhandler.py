@@ -243,8 +243,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.logger.info(f"Error creating column in {self.tables[stream]}")
 
     def primary_key_condition(self, stream):
-        self.logger.info(f"Primary keys: {', '.join(self.key_properties[stream])}")
-        keys = [f"t.{k}=s.{k}" for k in self.key_properties[stream]]
+        key_properties = [k.replace(".", "_") for k in self.key_properties[stream]]
+        self.logger.info(f"Primary keys: {', '.join(key_properties)}")
+        keys = [f"t.{k}=s.{k}" for k in key_properties]
         if len(keys) < 1:
             raise Exception(f"No primary keys specified from the tap and Incremental option selected")
         return " and ".join(keys)
