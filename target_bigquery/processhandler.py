@@ -291,10 +291,10 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.create_missing_columns(stream)
                 incremental_success = False
                 truncate_stream = self.table_configs.get(stream, {}).get("truncate", False)
-                if truncate_stream:
+                self.truncate = self.truncate or truncate_stream
+                if self.truncate:
                     self.logger.info(f"Truncating dataset: {stream}")
 
-                self.truncate = self.truncate or truncate_stream
                 self.incremental = self.incremental if not self.truncate else False
                 if self.incremental:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
@@ -329,9 +329,8 @@ class LoadJobProcessHandler(BaseProcessHandler):
                         self.truncate = True
 
                 if not incremental_success:
-                    truncate = self.truncate if stream not in self.partially_loaded_streams else False
                     copy_config = CopyJobConfig()
-                    if truncate:
+                    if self.truncate:
                         copy_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
                         self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FULL_TABLE")
                     else:
