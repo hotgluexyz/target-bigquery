@@ -293,7 +293,6 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False)
                 if instance_truncate:
                     self.logger.info(f"Truncating dataset: {stream}")
-
                 instance_increment = self.incremental if not instance_truncate else False
                 if instance_increment:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
