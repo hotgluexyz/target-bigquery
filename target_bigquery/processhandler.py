@@ -293,9 +293,8 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False)
                 if instance_truncate:
                     self.logger.info(f"Truncating dataset: {stream}")
-
-                self.incremental = self.incremental if not self.truncate else False
-                if self.incremental:
+                instance_increment = self.incremental if not instance_truncate else False
+                if instance_increment:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
                     self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
                     table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
