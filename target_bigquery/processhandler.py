@@ -1,9 +1,11 @@
 import json
 import uuid
+import backoff
+import singer
+
 from datetime import datetime
 from tempfile import TemporaryFile
 
-import singer
 from google.api_core import exceptions as google_exceptions
 from google.cloud import bigquery
 from google.cloud.bigquery import LoadJobConfig, CopyJobConfig, QueryJobConfig
@@ -252,6 +254,11 @@ class LoadJobProcessHandler(BaseProcessHandler):
     #TODO: test it with multiple ids (an array of ids, if there are multiple key_properties in JSON schema)
     #TODO: test it with dupe ids in the data
 
+    @backoff.on_exception(
+        backoff.expo,
+        google_exceptions.BadRequest,
+        max_tries=3
+    )
     def _do_temp_table_based_load(self, rows):
         assert isinstance(rows, dict)
 
@@ -324,7 +331,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
                     except NotFound:
                         self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
-                        self.truncate = True
+                        instance_truncate = True
 
                 if not incremental_success:
                     copy_config = CopyJobConfig()
