@@ -319,9 +319,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
                             """.format(table=table_id,
                                        temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
                                        primary_key_condition=self.primary_key_condition(stream),
-                                       set_values=', '.join(f'{c}=s.{c}' for c in column_names),
-                                       new_cols=', '.join(column_names),
-                                       cols=', '.join(f's.{c}' for c in column_names))
+                                       set_values=', '.join(f'`{c}`=s.`{c}`' for c in column_names),
+                                       new_cols=', '.join(f'`{c}`' for c in column_names),
+                                       cols=', '.join(f's.`{c}`' for c in column_names))
 
                         job_config = QueryJobConfig()
                         query_job = self.client.query(query, job_config=job_config)
