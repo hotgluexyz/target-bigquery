@@ -297,7 +297,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
             for stream, tmp_table_name in loaded_tmp_tables:
                 self.create_missing_columns(stream)
                 incremental_success = False
-                instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False)
+                instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
                 if instance_truncate:
                     self.logger.info(f"Truncating dataset: {stream}")
                 instance_increment = self.incremental if not instance_truncate else False
