@@ -3,4 +3,4 @@ google-cloud-bigquery==2.34.3
 jsonschema~=2.6.0
 setuptools~=60.3.1
 pendulum
-backoff
+backoff==1.8.0
