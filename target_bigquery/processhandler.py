@@ -219,7 +219,17 @@ class LoadJobProcessHandler(BaseProcessHandler):
     def on_stream_end(self):
         self._do_temp_table_based_load(self.rows)
         yield self.STATE
-
+    @backoff.on_exception(
+        backoff.expo,
+        Exception,
+        max_tries=3
+    )    
+    def update_table(self, table,schema):
+        try:
+            return self.client.update_table(table, schema)
+        #TODO Figure out exact connection exception and back it off
+        except Exception as e:
+            raise Exception(e)
     def create_missing_columns(self, stream):
         table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
 
@@ -240,7 +250,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         if new_columns:
             table.schema = new_schema
             try:
-                table = self.client.update_table(table, ["schema"])
+                table = self.update_table(table, ["schema"])
             except:
                 self.logger.info(f"Error creating column in {self.tables[stream]}")
 
@@ -254,6 +264,32 @@ class LoadJobProcessHandler(BaseProcessHandler):
     #TODO: test it with multiple ids (an array of ids, if there are multiple key_properties in JSON schema)
     #TODO: test it with dupe ids in the data
 
+    @backoff.on_exception(
+        backoff.expo,
+        Exception,
+        max_tries=3
+    ) 
+    def query(self, query,job_config):
+        try:
+            return self.client.query(query, job_config=job_config)
+        except Exception as e:
+    
+            raise Exception(e)
+    
+    @backoff.on_exception(
+        backoff.expo,
+        Exception,
+        max_tries=3
+    )     
+    def copy_table(self, tmp_table_name, stream, copy_config):
+        try:
+            return self.client.copy_table(
+                            sources=self.dataset.table(tmp_table_name),
+                            destination=self.dataset.table(self.tables[stream]),
+                            job_config=copy_config
+                        ).result()
+        except Exception as e:
+            raise Exception(e)    
     @backoff.on_exception(
         backoff.expo,
         google_exceptions.BadRequest,
@@ -324,7 +360,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                                        cols=', '.join(f's.`{c}`' for c in column_names))
 
                         job_config = QueryJobConfig()
-                        query_job = self.client.query(query, job_config=job_config)
+                        query_job = self.query(query,job_config=job_config)
                         query_job.result()
                         self.logger.info(f'LOADED {query_job.num_dml_affected_rows} rows')
                         incremental_success = True
@@ -342,11 +378,11 @@ class LoadJobProcessHandler(BaseProcessHandler):
                         copy_config.write_disposition = WriteDisposition.WRITE_APPEND
                         self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by APPEND")
 
-                    self.client.copy_table(
-                        sources=self.dataset.table(tmp_table_name),
-                        destination=self.dataset.table(self.tables[stream]),
-                        job_config=copy_config
-                    ).result()
+                    self.copy_table(
+                        tmp_table_name,
+                        stream,
+                        copy_config
+                    )
 
                 self.partially_loaded_streams.add(stream)
                 self.rows[stream].close()  # erase the file
