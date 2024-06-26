@@ -306,7 +306,6 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
                 if stream in self.truncate_counts and self.truncate_counts[stream] > 0:
                     instance_truncate = False
-                    instance_increment = False
                 if instance_increment:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
                     self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
