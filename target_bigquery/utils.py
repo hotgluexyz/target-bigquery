@@ -46,6 +46,9 @@ def ensure_dataset(project_id, dataset_id, location):
     try:
         client.create_dataset(dataset_ref)
     except exceptions.GoogleAPICallError as e:
+        if e.response.status_code == 403:
+            logger.info(f"Skipping dataset validation due user does not have permission to create datasets. Using dataset id from config {dataset_id}")
+            pass
         if e.response.status_code == 409:  # dataset exists
             pass
         else:
