@@ -49,7 +49,7 @@ def ensure_dataset(project_id, dataset_id, location):
         if e.response.status_code == 403:
             logger.info(f"Skipping dataset validation due user does not have permission to create datasets. Using dataset id from config {dataset_id}")
             pass
-        if e.response.status_code == 409:  # dataset exists
+        elif e.response.status_code == 409:  # dataset exists
             pass
         else:
             logger.critical(f"unable to create dataset {dataset_id} in project {project_id}; Exception {e}")
