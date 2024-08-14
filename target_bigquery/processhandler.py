@@ -256,7 +256,10 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
     @backoff.on_exception(
         backoff.expo,
-        google_exceptions.BadRequest,
+        (
+            google_exceptions.BadRequest,
+            google_exceptions.ServiceUnavailable,
+        ),
         max_tries=3
     )
     def _do_temp_table_based_load(self, rows):
