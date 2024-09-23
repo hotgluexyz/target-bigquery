@@ -304,7 +304,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 instance_increment = self.incremental if not instance_truncate else False
                 # For larger jobs we don't want to keep truncating the same table when copy temporary table to production
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
-                if stream in self.truncate_counts and self.truncate_counts[stream] > 0:
+                if stream in self.truncate_counts and self.truncate_counts.get(stream, 0) > 0:
                     instance_truncate = False
                 if instance_increment:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
