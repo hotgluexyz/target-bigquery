@@ -11,7 +11,7 @@ extras = {
 
 setup(
     name="target-bigquery",
-    version="0.11.6",
+    version="0.11.13",
     description="Singer.io target for writing data to Google BigQuery",
     author="Adswerve",
     url="https://github.com/adswerve/target-bigquery",

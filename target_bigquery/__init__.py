@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import os
 import argparse
 import io
 import json
@@ -63,7 +63,7 @@ def main():
     # determine replication method: append, truncate or incremental
     truncate = False
     incremental = False
-    if config.get("replication_method", "append").lower() == "truncate":
+    if config.get("replication_method", "append").lower() == "truncate" or (config.get("truncate_on_full_sync") and os.environ.get("SYNC_TYPE") == "full_sync"):
         truncate = True
     elif config.get("replication_method", "append").lower() == "incremental":
         incremental = True
