@@ -307,9 +307,18 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.create_missing_columns(stream)
                 incremental_success = False
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
+                instance_increment = self.incremental if not instance_truncate else False
+
+                key_properties = [k.replace(".", "_") for k in self.key_properties[stream]]
+
+                if instance_increment and not key_properties:
+                    # Fall back to truncate because there's no PK to upsert on
+                    self.logger.info(f"Falling back to truncate because {stream} has no key properties")
+                    instance_truncate = True
+                    instance_increment = False
+
                 if instance_truncate:
                     self.logger.info(f"Truncating dataset: {stream}")
-                instance_increment = self.incremental if not instance_truncate else False
                 # For larger jobs we don't want to keep truncating the same table when copy temporary table to production
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
                 if stream in self.truncate_counts and self.truncate_counts.get(stream, 0) > 0:
