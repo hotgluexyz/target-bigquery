@@ -81,8 +81,10 @@ class BaseProcessHandler(object):
         if msg.stream in self.tables:
             return iter([])
 
-        self.tables[msg.stream] = "{}{}{}".format(
-            self.table_prefix, msg.stream, self.table_suffix
+        self.tables[msg.stream] = create_valid_bigquery_name(
+            "{}{}{}".format(
+                self.table_prefix, msg.stream, self.table_suffix
+            )
         )
         self.schemas[msg.stream] = msg.schema
         validator_cls = validator_for(msg.schema)
