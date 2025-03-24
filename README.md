@@ -25,6 +25,7 @@ and [Hubspot] to Google BigQuery.
     - [Step 6: target-tables-config file: force data types and modes](#step-6-target-tables-config-file-force-data-types-and-modes)
 - [Unit tests set up](#unit-tests-set-up)
 - [Config files in this project](#config-files-in-this-project)
+- [Note about BigQuery table/columns names](#note-about-bigquery-tablecolumns-names)
 
 ## Contact
 
@@ -550,3 +551,12 @@ This project has three locations with config files:
 [python-ubuntu]: https://www.digitalocean.com/community/tutorials/how-to-install-python-3-and-set-up-a-local-programming-environment-on-ubuntu-16-04
 
 [tap-recharge]: https://github.com/singer-io/tap-recharge
+
+## Note about BigQuery table/columns names
+
+BigQuery has some [rules](https://cloud.google.com/bigquery/docs/schemas) about naming tables/columns. For that reason this target writer will:
+
+- Replace special characters with `_`
+- Add a `_` prefix when the name starts with `_TABLE_`, `_FILE_`, `_PARTITION_`, `_ROW_TIMESTAMP_`, `__ROOT__`
+- Add a `_` prefix if the name doesn't start with a letter or `_`
+- Truncate the name to 300 characters if the length is greater than 300
