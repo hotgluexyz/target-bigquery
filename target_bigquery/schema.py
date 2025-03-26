@@ -35,7 +35,7 @@ def cleanup_record(schema, record):
     elif isinstance(record, dict):
         nr = {}
         for key, value in record.items():
-            nkey = create_valid_bigquery_field_name(key)
+            nkey = create_valid_bigquery_name(key)
             nr[nkey] = cleanup_record(schema, value)
         return nr
 
@@ -43,39 +43,44 @@ def cleanup_record(schema, record):
         raise Exception(f"unhandled instance of record: {record}")
 
 
-def create_valid_bigquery_field_name(field_name):
+def create_valid_bigquery_name(column_name: str) -> str:
     """
-    Clean up / prettify field names, make sure they match BigQuery naming conventions.
+    Transforms a given column name into a BigQuery-compliant column name.
 
-    Fields must:
-        • contain only
-            -letters,
-            -numbers, and
-            -underscores,
-        • start with a
-            -letter or
-            -underscore, and
-        • be at most 300 characters long
+    BigQuery column naming rules:
+    - Can only contain letters (a-z, A-Z), numbers (0-9), and underscores (_).
+    - Must start with a letter or an underscore.
+    - Cannot exceed 300 characters in length.
+    - Cannot use reserved prefixes: `_TABLE_`, `_FILE_`, `_PARTITION_`, `_ROW_TIMESTAMP_`, or `__ROOT__`.
+    - Case insensitive: "Column1" and "column1" are treated as the same name.
+    - Spaces and special characters must be replaced with underscores (_).
 
-    :param key: JSON field name
-    :return: cleaned up JSON field name
+    Args:
+        column_name (str): The original column name.
+
+    Returns:
+        str: A sanitized, BigQuery-compliant column name.
     """
+    # Strip leading and trailing spaces
+    column_name = column_name.strip()
 
-    cleaned_up_field_name = ""
+    # Replace all non-alphanumeric characters (excluding underscore) with underscores
+    column_name = re.sub(r'[^a-zA-Z0-9_]', '_', column_name)
 
-    # if char is alphanumeric (either letters or numbers), append char to our string
-    for char in field_name:
-        if char.isalnum():
-            cleaned_up_field_name += char
-        else:
-            # otherwise, replace it with underscore
-            cleaned_up_field_name += "_"
+    # Ensure the column name starts with a letter or underscore
+    if not re.match(r'^[A-Za-z_]', column_name):
+        column_name = '_' + column_name
 
-    # if field starts with digit, prepend it with underscore
-    if cleaned_up_field_name[0].isdigit():
-        cleaned_up_field_name = "_%s" % cleaned_up_field_name
+    # Truncate to 300 characters if necessary
+    column_name = column_name[:300]
 
-    return cleaned_up_field_name[:300]  # trim the string to the first x chars
+    # Avoid reserved prefixes
+    reserved_prefixes = ['_TABLE_', '_FILE_', '_PARTITION_', '_ROW_TIMESTAMP_', '__ROOT__']
+    for prefix in reserved_prefixes:
+        if column_name.startswith(prefix):
+            column_name = '_' + column_name
+
+    return column_name
 
 
 def prioritize_one_data_type_from_multiple_ones_in_any_of(field_property):
@@ -299,7 +304,7 @@ def build_field(field_name, field_property):
         precision, scale = determine_precision_and_scale_for_decimal_or_bigdecimal(field_property) if field_type in [
             "DECIMAL", "BIGDECIMAL"] else (None, None)
 
-        return (SchemaField(name=create_valid_bigquery_field_name(field_name),
+        return (SchemaField(name=create_valid_bigquery_name(field_name),
                             field_type=field_type,
                             mode=determine_field_mode(field_property),
                             description=None,
@@ -325,7 +330,7 @@ def build_field(field_name, field_property):
                                                                    ).items():
             processed_subfields.append(build_field(subfield_name, subfield_property))
 
-        return (SchemaField(name=create_valid_bigquery_field_name(field_name),
+        return (SchemaField(name=create_valid_bigquery_name(field_name),
                             field_type=field_type,
                             mode=determine_field_mode(field_property),
                             description=None,

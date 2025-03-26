@@ -1,6 +1,6 @@
 import re
 import singer
-from target_bigquery.schema import create_valid_bigquery_field_name
+from target_bigquery.schema import create_valid_bigquery_name
 
 LOGGER = singer.get_logger()
 
@@ -107,7 +107,7 @@ def check_schema_for_dupes_in_field_names(stream_name, schema):
         for field_name, field_property in schema.get("properties", schema.get("items", {}).get("properties", {})).items():
             if not ("items" in field_property and "properties" in field_property["items"]) \
                     and not ("properties" in field_property):
-                key = create_valid_bigquery_field_name(field_name.upper())
+                key = create_valid_bigquery_name(field_name.upper())
                 if not f_dict.get(key):
                     f_dict[key] = [field_name]
                 else:
@@ -116,7 +116,7 @@ def check_schema_for_dupes_in_field_names(stream_name, schema):
             elif ("items" in field_property and "properties" in field_property["items"]) \
                     or ("properties" in field_property):
                 nd = build_field_list(field_property)
-                key = create_valid_bigquery_field_name(field_name.upper())
+                key = create_valid_bigquery_name(field_name.upper())
                 for k, v in nd.items():
                     if not f_dict.get(f"{key}.{k}"):
                         f_dict[f"{key}.{k}"] = [f"{field_name}.{i}" for i in v]

@@ -15,7 +15,7 @@ from google.cloud.exceptions import NotFound
 from jsonschema.validators import validator_for
 
 from target_bigquery.encoders import DecimalEncoder
-from target_bigquery.schema import build_schema, cleanup_record, format_record_to_schema
+from target_bigquery.schema import build_schema, cleanup_record, create_valid_bigquery_name, format_record_to_schema
 
 from target_bigquery.simplify_json_schema import simplify
 from target_bigquery.validate_json_schema import validate_json_schema_completeness, \
@@ -81,8 +81,10 @@ class BaseProcessHandler(object):
         if msg.stream in self.tables:
             return iter([])
 
-        self.tables[msg.stream] = "{}{}{}".format(
-            self.table_prefix, msg.stream, self.table_suffix
+        self.tables[msg.stream] = create_valid_bigquery_name(
+            "{}{}{}".format(
+                self.table_prefix, msg.stream, self.table_suffix
+            )
         )
         self.schemas[msg.stream] = msg.schema
         validator_cls = validator_for(msg.schema)
@@ -251,7 +253,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.logger.info(f"Error creating column in {self.tables[stream]}")
 
     def primary_key_condition(self, stream):
-        key_properties = [k.replace(".", "_") for k in self.key_properties[stream]]
+        key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
         self.logger.info(f"Primary keys: {', '.join(key_properties)}")
         keys = [f"t.{k}=s.{k}" for k in key_properties]
         if len(keys) < 1:
@@ -309,7 +311,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
                 instance_increment = self.incremental if not instance_truncate else False
 
-                key_properties = [k.replace(".", "_") for k in self.key_properties[stream]]
+                key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
 
                 if instance_increment and not key_properties:
                     # Fall back to truncate because there's no PK to upsert on

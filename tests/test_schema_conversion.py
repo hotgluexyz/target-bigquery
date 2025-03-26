@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 from target_bigquery.schema import build_schema, prioritize_one_data_type_from_multiple_ones_in_any_of, \
-    convert_field_type, determine_precision_and_scale_for_decimal_or_bigdecimal
+    convert_field_type, determine_precision_and_scale_for_decimal_or_bigdecimal, create_valid_bigquery_name
 
 from tests.schema_old import build_schema_old
 
@@ -228,6 +228,29 @@ class TestHelpersFunctions(unittestcore.BaseUnitTest):
 
         assert scale == 10
         assert precision == 48
+
+    def test_create_valid_bigquery_name(self):
+        very_long_name = "table_name_test"*40
+
+        input_outputs = [
+            # check that it replaces special characters with _
+            ("t%ab*le_te&st", "t_ab_le_te_st"),
+            ("t ab@le_te~st", "t_ab_le_te_st"),
+            # must start with a letter or underscore
+            ("0table_name", "_0table_name"),
+            # check starting with reserved keywords
+            ("_TABLE_", "__TABLE_"),
+            ("_TABLE_test", "__TABLE_test"),
+            ("_TABLE_tes%t", "__TABLE_tes_t"),
+            ("_FILE_test", "__FILE_test"),
+            ("_PARTITION_test", "__PARTITION_test"),
+            ("_ROW_TIMESTAMP_test", "__ROW_TIMESTAMP_test"),
+            ("__ROOT__test", "___ROOT__test"),
+            # check truncates to max size
+            (very_long_name, very_long_name[:300])
+        ]
+        for input_output in input_outputs:
+            assert create_valid_bigquery_name(input_output[0]) == input_output[1]
 
 
 class TestSchemaConversion(unittestcore.BaseUnitTest):
@@ -737,3 +760,17 @@ class TestSchemaConversion(unittestcore.BaseUnitTest):
         compare_old_vs_new_schema_conversion(os.path.join(os.path.join(
             os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tests"), "rsc"),
             "schemas"), "input_json_schemas_shopify.json"), ignore_float_vs_decimal_bigdecimal_difference=True)
+
+    def test_invalid_characters_in_schema(self):
+
+        schema_0_input = schema_invalid_characters_1
+
+        msg = singer.parse_message(schema_0_input)
+
+        schema_1_simplified = simplify(msg.schema)
+
+        schema_2_built = build_schema(schema_1_simplified, key_properties=msg.key_properties,
+                                                 add_metadata=True)
+
+        assert schema_2_built[0].name == "i_d"
+        assert schema_2_built[1].name == "na_me"
