@@ -40,6 +40,7 @@ class BaseProcessHandler(object):
         self.validate_records = kwargs.get("validate_records", True)
         self.table_configs = kwargs.get("table_configs", {}) or {}
         self.INIT_STATE = kwargs.get("initial_state") or {}
+        self.force_unquote_safe_table_names = kwargs.get("force_unquote_safe_table_names", False)
         # PartialLoadJobProcessHandler kwargs
         self.max_cache = kwargs.get("max_cache", 1024 * 1024 * 50)
 
@@ -81,11 +82,14 @@ class BaseProcessHandler(object):
         if msg.stream in self.tables:
             return iter([])
 
-        self.tables[msg.stream] = create_valid_bigquery_name(
-            "{}{}{}".format(
+        self.tables[msg.stream] = "{}{}{}".format(
                 self.table_prefix, msg.stream, self.table_suffix
             )
-        )
+        
+        self.tables[msg.stream] = create_valid_bigquery_name(
+            self.tables[msg.stream]
+        ) if self.force_unquote_safe_table_names else self.tables[msg.stream]
+
         self.schemas[msg.stream] = msg.schema
         validator_cls = validator_for(msg.schema)
         validator_cls.check_schema(msg.schema)
