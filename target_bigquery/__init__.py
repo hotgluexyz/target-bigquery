@@ -74,6 +74,7 @@ def main():
     location = config.get("location", "US")
     validate_records = config.get("validate_records", True)
     add_metadata_columns = config.get("add_metadata_columns", True)
+    force_unquote_safe_table_names = config.get("force_unquote_safe_table_names", False)
 
     # we can pass merge state option via CLI param
     merge_state_messages_cli = flags.merge_state_messages
@@ -126,7 +127,8 @@ def main():
             table_suffix=table_suffix,
             add_metadata_columns=add_metadata_columns,
             table_configs=table_configs,
-            max_cache=max_cache
+            max_cache=max_cache,
+            force_unquote_safe_table_names=force_unquote_safe_table_names
         )
 
         # write a state file
