@@ -28,6 +28,7 @@ def process(
             - location
             - truncate
             - validate_records
+            - force_alphanumeric_table_names
             ...
 
     :return: state, State
