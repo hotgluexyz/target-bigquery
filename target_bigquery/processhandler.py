@@ -320,7 +320,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 incremental_success = False
                 table_config = self.table_configs.get(stream, {})
 
-                replication_method: ReplicationMethod = ReplicationMethod.TRUNCATE
+                replication_method: ReplicationMethod = ReplicationMethod.APPEND
                 if self.truncate:
                     replication_method = ReplicationMethod.APPEND
                 elif self.incremental:
