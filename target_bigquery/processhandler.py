@@ -2,7 +2,7 @@ import json
 import uuid
 import backoff
 import singer
-from target_bigquery.sql_utils import generate_filtered_replace_script
+from target_bigquery.sql_utils import generate_filtered_replace_script, build_filtered_replace_partition_mapping, get_filtered_partition_ranges
 from datetime import datetime
 from tempfile import TemporaryFile
 
@@ -314,8 +314,8 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 incremental_success = False
                 table_config = self.table_configs.get(stream, {})
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
-                instance_filtered_replace = table_config.get("replication_method") == "filtered_replace" and table_config.get("filtered_replace")
-                instance_increment = self.incremental if not instance_truncate else False
+                instance_filtered_replace = table_config.get("replication_method") == "filtered_replace"
+                instance_increment = self.incremental if not (instance_truncate or instance_filtered_replace) else False
 
                 key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
 
@@ -325,7 +325,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                     instance_truncate = True
                     instance_increment = False
 
-                if instance_truncate:
+                if instance_truncate and not instance_filtered_replace and not instance_increment:
                     self.logger.info(f"Truncating dataset: {stream}")
                 # For larger jobs we don't want to keep truncating the same table when copy temporary table to production
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
@@ -342,53 +342,29 @@ class LoadJobProcessHandler(BaseProcessHandler):
                     - Copy new data to target table -- Costs s
                     """
 
-                    chunk_keys = table_config.get("filtered_replace", {}).get("chunk_keys", [])
-                    filter_key = table_config.get("filtered_replace", {}).get("filter_key", [])
+                    chunk_keys = table_config.get("filtered_replace_keys", {}).get("chunk_keys", [])
+                    filter_key = table_config.get("filtered_replace_keys", {}).get("filter_key", [])
+                    if not filter_key:
+                        # Default to partition field
+                        filter_key = table_config.get("partition_field", None)
+
+                    if not filter_key or not isinstance(filter_key, str):
+                        raise Exception("Singular filter_key is required for filtered_replace replication method")
+
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FILTERED_REPLACE")
 
                     table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
-
+                    temp_table_id = f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}"
                     try:
                         self.client.get_table(table_id)
 
-
                         # BigQ requires that the partition condition is known at compile time
                         # So we first get the max/min values per chunk_key
+                        result = get_filtered_partition_ranges(client=self.client, chunk_keys=chunk_keys, filter_key=filter_key, temp_table=temp_table_id)
 
-                        get_range_query = """
-                            SELECT {chunk_keys}, MIN({filter_key}) as min_filter_val, MAX({filter_key}) as max_filter_val
-                            FROM `{temp_table}`
-                            GROUP BY {chunk_keys}
-                        """
+                        partition_mapping = build_filtered_replace_partition_mapping(result)
 
-                        get_range_query = get_range_query.format(
-                            chunk_keys=', '.join(chunk_keys),
-                            filter_key=filter_key,
-                            temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}"
-                        )
-
-                        get_range_job = self.client.query(get_range_query)
-                        result = get_range_job.result().pages
-
-                        partition_mapping = []
-                        for page in result:
-                            for row in page:
-                                partition_group = {}
-                                for key, col_num in row._xxx_field_to_index.items():
-                                    value = row._xxx_values[col_num]
-                                    partition_group[key] = value
-
-                                partition_mapping.append(partition_group)
-
-                        query, exists_conditions = generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping)
-
-                        query = query.format(
-                            table=table_id,
-                            temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
-                            filter_key=filter_key,
-                            exists_conditions=exists_conditions
-                        )
-
+                        query = generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping, table_id, temp_table_id)
 
                         job_config = QueryJobConfig()
                         query_job = self.client.query(query)

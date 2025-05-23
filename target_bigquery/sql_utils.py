@@ -1,4 +1,4 @@
-def generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping):
+def generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping, table_id, temp_table_id):
     """
     Generate a script to delete and replace rows in a table based on a filtered set of partitions.
 
@@ -26,6 +26,7 @@ def generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping):
         chunk_conditions = " AND ".join(
             f"{key} = '{part[key]}'" for key in chunk_keys
         )
+        chunk_conditions = chunk_conditions or "1=1"
         filter_condition = (
             f"{filter_key} >= '{part['min_filter_val']}' AND "
             f"{filter_key} <= '{part['max_filter_val']}'"
@@ -43,4 +44,44 @@ def generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping):
     SELECT *
     FROM `{temp_table}`;
     """
-    return query, exists_conditions
+
+
+    query = query.format(
+        table=table_id,
+        temp_table=temp_table_id,
+        filter_key=filter_key,
+        exists_conditions=exists_conditions
+    )
+    return query
+
+
+def build_filtered_replace_partition_mapping(result):
+    partition_mapping = []
+    for page in result:
+        for row in page:
+            partition_group = {}
+            for key, col_num in row._xxx_field_to_index.items():
+                value = row._xxx_values[col_num]
+                partition_group[key] = value
+
+            partition_mapping.append(partition_group)
+    return partition_mapping
+
+
+def get_filtered_partition_ranges(client, chunk_keys, filter_key, temp_table):
+    get_range_query = """
+        SELECT {chunk_keys}, MIN({filter_key}) as min_filter_val, MAX({filter_key}) as max_filter_val
+        FROM `{temp_table}`
+        GROUP BY {chunk_keys}
+    """
+    chunk_keys_str = ', '.join(chunk_keys) if chunk_keys else "1=1"
+    get_range_query = get_range_query.format(
+        chunk_keys=chunk_keys_str,
+        filter_key=filter_key,
+        temp_table=temp_table
+    )
+
+    get_range_job = client.query(get_range_query)
+    result = get_range_job.result().pages
+    return result
+
