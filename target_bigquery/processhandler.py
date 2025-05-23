@@ -2,7 +2,7 @@ import json
 import uuid
 import backoff
 import singer
-
+from target_bigquery.sql_utils import generate_filtered_replace_script
 from datetime import datetime
 from tempfile import TemporaryFile
 
@@ -312,7 +312,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
             for stream, tmp_table_name in loaded_tmp_tables:
                 self.create_missing_columns(stream)
                 incremental_success = False
+                table_config = self.table_configs.get(stream, {})
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
+                instance_filtered_replace = table_config.get("replication_method") == "filtered_replace" and table_config.get("filtered_replace")
                 instance_increment = self.incremental if not instance_truncate else False
 
                 key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
@@ -329,7 +331,75 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
                 if stream in self.truncate_counts and self.truncate_counts.get(stream, 0) > 0:
                     instance_truncate = False
-                if instance_increment:
+
+                if instance_filtered_replace:
+                    """
+                    If your new date is all in the same set of partitions, then this method costs only 2 * size of source data
+                    Let s be the size of source data
+
+                    - Find max/min dates by set of chunk_keys -- Costs s
+                    - Delete rows in target table that are in the same set of partitions -- Costs 0
+                    - Copy new data to target table -- Costs s
+                    """
+
+                    chunk_keys = table_config.get("filtered_replace", {}).get("chunk_keys", [])
+                    filter_key = table_config.get("filtered_replace", {}).get("filter_key", [])
+                    self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FILTERED_REPLACE")
+
+                    table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
+
+                    try:
+                        self.client.get_table(table_id)
+
+
+                        # BigQ requires that the partition condition is known at compile time
+                        # So we first get the max/min values per chunk_key
+
+                        get_range_query = """
+                            SELECT {chunk_keys}, MIN({filter_key}) as min_filter_val, MAX({filter_key}) as max_filter_val
+                            FROM `{temp_table}`
+                            GROUP BY {chunk_keys}
+                        """
+
+                        get_range_query = get_range_query.format(
+                            chunk_keys=', '.join(chunk_keys),
+                            filter_key=filter_key,
+                            temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}"
+                        )
+
+                        get_range_job = self.client.query(get_range_query)
+                        result = get_range_job.result().pages
+
+                        partition_mapping = []
+                        for page in result:
+                            for row in page:
+                                partition_group = {}
+                                for key, col_num in row._xxx_field_to_index.items():
+                                    value = row._xxx_values[col_num]
+                                    partition_group[key] = value
+
+                                partition_mapping.append(partition_group)
+
+                        query, exists_conditions = generate_filtered_replace_script(chunk_keys, filter_key, partition_mapping)
+
+                        query = query.format(
+                            table=table_id,
+                            temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
+                            filter_key=filter_key,
+                            exists_conditions=exists_conditions
+                        )
+
+
+                        job_config = QueryJobConfig()
+                        query_job = self.client.query(query)
+                        query_job.result()
+                        self.logger.info(f'LOADED rows')
+                        incremental_success = True
+                    except NotFound:
+                        self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
+                        instance_truncate = True
+                    
+                elif instance_increment:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
                     self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
                     table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
@@ -421,7 +491,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         # schema = build_schema(schema_simplified, key_properties=key_props, add_metadata=metadata_columns,
         #                       force_fields=force_fields)
         load_config = LoadJobConfig()
-        load_config.ignore_unknown_values = True
+        load_config.ignore_unknown_values = False
         load_config.schema = table_schema
 
         # partitioning
