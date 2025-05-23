@@ -353,7 +353,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
                 if replication_method == ReplicationMethod.FILTERED_REPLACE:
                     """
-                    If your new date is all in the same set of partitions, then this method costs only 2 * size of source data
+                    If your new data is all in the same set of partitions, then this method costs only 2 * size of source data
                     Let s be the size of source data
 
                     - Find max/min dates by set of chunk_keys -- Costs s
@@ -486,7 +486,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         # schema = build_schema(schema_simplified, key_properties=key_props, add_metadata=metadata_columns,
         #                       force_fields=force_fields)
         load_config = LoadJobConfig()
-        load_config.ignore_unknown_values = False
+        load_config.ignore_unknown_values = True
         load_config.schema = table_schema
 
         # partitioning
