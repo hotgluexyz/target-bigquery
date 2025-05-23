@@ -322,7 +322,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
                 replication_method: ReplicationMethod = ReplicationMethod.APPEND
                 if self.truncate:
-                    replication_method = ReplicationMethod.APPEND
+                    replication_method = ReplicationMethod.TRUNCATE
                 elif self.incremental:
                     replication_method = ReplicationMethod.INCREMENTAL
                 
