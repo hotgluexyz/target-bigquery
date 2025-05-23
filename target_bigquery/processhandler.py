@@ -5,7 +5,7 @@ import singer
 from target_bigquery.sql_utils import generate_filtered_replace_script, build_filtered_replace_partition_mapping, get_filtered_partition_ranges
 from datetime import datetime
 from tempfile import TemporaryFile
-
+from enum import Enum
 from google.api_core import exceptions as google_exceptions
 from google.cloud import bigquery
 from google.cloud.bigquery import LoadJobConfig, CopyJobConfig, QueryJobConfig
@@ -20,6 +20,12 @@ from target_bigquery.schema import build_schema, cleanup_record, create_valid_bi
 from target_bigquery.simplify_json_schema import simplify
 from target_bigquery.validate_json_schema import validate_json_schema_completeness, \
     check_schema_for_dupes_in_field_names
+
+class ReplicationMethod(Enum):
+    TRUNCATE = "truncate"
+    FILTERED_REPLACE = "filtered_replace"
+    INCREMENTAL = "incremental"
+    APPEND = "append"
 
 
 class BaseProcessHandler(object):
@@ -313,26 +319,39 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.create_missing_columns(stream)
                 incremental_success = False
                 table_config = self.table_configs.get(stream, {})
-                instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
-                instance_filtered_replace = table_config.get("replication_method") == "filtered_replace"
-                instance_increment = self.incremental if not (instance_truncate or instance_filtered_replace) else False
+
+                replication_method: ReplicationMethod = ReplicationMethod.TRUNCATE
+                if self.truncate:
+                    replication_method = ReplicationMethod.APPEND
+                elif self.incremental:
+                    replication_method = ReplicationMethod.INCREMENTAL
+                
+                if table_config.get("replication_method"):
+                    # Override replication method if it's set in the table config
+                    if table_config.get("truncate", False) or table_config.get("replication_method") == "truncate":
+                        replication_method = ReplicationMethod.TRUNCATE
+                    elif table_config.get("replication_method") == "filtered_replace":
+                        replication_method = ReplicationMethod.FILTERED_REPLACE
+                    elif table_config.get("replication_method") == "incremental":
+                        replication_method = ReplicationMethod.INCREMENTAL
+                    elif table_config.get("replication_method") == "append":
+                        replication_method = ReplicationMethod.APPEND
 
                 key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
 
-                if instance_increment and not key_properties:
+                if replication_method == ReplicationMethod.INCREMENTAL and not key_properties:
                     # Fall back to truncate because there's no PK to upsert on
                     self.logger.info(f"Falling back to truncate because {stream} has no key properties")
-                    instance_truncate = True
-                    instance_increment = False
+                    replication_method = ReplicationMethod.TRUNCATE
 
-                if instance_truncate and not instance_filtered_replace and not instance_increment:
-                    self.logger.info(f"Truncating dataset: {stream}")
+                self.logger.info(f"Attempting to load dataset: {stream} with replication method: {replication_method}")
+
                 # For larger jobs we don't want to keep truncating the same table when copy temporary table to production
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
                 if stream in self.truncate_counts and self.truncate_counts.get(stream, 0) > 0:
-                    instance_truncate = False
+                    replication_method = ReplicationMethod.INCREMENTAL
 
-                if instance_filtered_replace:
+                if replication_method == ReplicationMethod.FILTERED_REPLACE:
                     """
                     If your new date is all in the same set of partitions, then this method costs only 2 * size of source data
                     Let s be the size of source data
@@ -373,9 +392,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
                         incremental_success = True
                     except NotFound:
                         self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
-                        instance_truncate = True
+                        replication_method = ReplicationMethod.TRUNCATE
                     
-                elif instance_increment:
+                elif replication_method == ReplicationMethod.INCREMENTAL:
                     self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
                     self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
                     table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
@@ -405,11 +424,11 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
                     except NotFound:
                         self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
-                        instance_truncate = True
+                        replication_method = ReplicationMethod.TRUNCATE
 
                 if not incremental_success:
                     copy_config = CopyJobConfig()
-                    if instance_truncate:
+                    if replication_method == ReplicationMethod.TRUNCATE:
                         copy_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
                         self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FULL_TABLE")
                     else:
