@@ -137,9 +137,9 @@ def main():
 
     except Exception as e:
         # load errors surface here
-        logger.critical(e)
         exc_type, exc_value, exc_traceback = sys.exc_info()
         logger.critical(repr(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+        logger.critical(e)
         return 2  # sys.exit(2)
 
     return 0  # sys.exit(0)
