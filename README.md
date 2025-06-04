@@ -429,14 +429,14 @@ You can only set up partitioning.
 #### Step 7: target-tables-config file: `filtered_replace` replication method
 
 Some data sources, such as Mixpanel and Google Analytics, often retroactively delete and modify records 
-as their attributition models become more accurate. 
-For example, Google Analytics may report a conversion on Monday, but new data retrieved on Wednesday may reveal that the orignal conversion was actually a bot.
+as their attribution models become more accurate. 
+For example, Google Analytics may report a conversion on Monday, but new data retrieved on Wednesday may reveal that the original conversion was actually a bot.
 
 In cases like these, you want the flexibility to delete old records if they are no longer present in your data source.
 
 While this could be achieved using `replication_method: truncate`, this can become very expensive and slow as you are deleting and rewriting the entire dataset on every export.
 
-Instead, `replication_method: filtered_replace` allows you to only sync a window of data and replace the partitions of your production table that overlap with the synced window of data.
+Instead, `replication_method: "filtered_replace"` allows you to only sync a window of data and replace the partitions of your production table that overlap with the synced window of data.
 
 You can turn on `filtered_replace` for a stream in the `target-tables-config.json` like so:
 
