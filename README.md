@@ -426,6 +426,53 @@ You can only set up partitioning.
 }
 ```
 
+#### Step 7: target-tables-config file: `filtered_replace` replication method
+
+Some data sources, such as Mixpanel and Google Analytics, often retroactively delete and modify records 
+as their attribution models become more accurate. 
+For example, Google Analytics may report a conversion on Monday, but new data retrieved on Wednesday may reveal that the original conversion was actually a bot.
+
+In cases like these, you want the flexibility to delete old records if they are no longer present in your data source.
+
+While this could be achieved using `replication_method: truncate`, this can become very expensive and slow as you are deleting and rewriting the entire dataset on every export.
+
+Instead, `replication_method: "filtered_replace"` allows you to only sync a window of data and replace the partitions of your production table that overlap with the synced window of data.
+
+You can turn on `filtered_replace` for a stream in the `target-tables-config.json` like so:
+
+```
+{
+    "streams": {
+        "ad_performance": {
+          "partition_field": "report_date",
+          "replication_method": "filtered_replace",
+          "filtered_replace_keys": {
+            "chunk_keys": ["customer_id"],
+            "filter_key": "report_date"
+          }
+        }
+    }
+}
+```
+
+The `filtered_replace` method works as such:
+
+1. Load new data into a temporary table `temp_table`
+2. For each set of unique `chunk_keys`, find the minimum and maximum values of `filter_key`
+3. For each unique set of `chunk_keys`, delete production data that is within those keys' `filter_key` range in the new data
+4. Insert the entirety of `temp_table` into the production table
+
+If you use a partition field for `filter_key`, and all the unique combinations of `chunk_keys` are reflected in your new data, 
+then you will only ever delete entire partitions at once in step 3 --- **These partition deletes are completely free in BigQuery**
+
+Thus in that happy case, the cost of the query will only be 2 x (Cost of processing your new data).
+
+Notes:
+- `chunk_keys` is optional
+- `filter_key` defaults to the `partition_field` if left blank
+- It is recommended that `partition_field` and `filter_key` are the same, but there may be use cases where you want them to be separate.
+
+
 ## Unit tests set up
 
 Add the following files to *sandbox* directory under project root directory:
