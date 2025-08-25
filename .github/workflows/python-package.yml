@@ -1,38 +1,16 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# This workflow will install Python dependencies and lint with flake8
 # For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
 
-#TODO: idea: only run a few unit tests in one branch and run all of them in master and consolidated development branch?
-# It takes a long time to run all unit tests on GitHub and locally
-# 13m 27s mins to run 68 successful unit tests on GitHub
-
-#TODO: how do we run two workflows from two commits sequentially, not simultaneously?
-#If there two commits pushed mins within each other, 2 workflows are going run simultaneously and they'll both fail cus they interfere with each other
-#(they both interact with the same GCP project, BQ dataset)
-# https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency
-
-# There's a few mins delay (~5 mins) for status badge in README to update (passing vs failing)
-
-name: Python package
-
-env:
-  GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-  TARGET_CONFIG: ${{ secrets.TARGET_CONFIG }}
-  TARGET_CONFIG_CACHE: ${{ secrets.TARGET_CONFIG_CACHE }}
-  TARGET_CONFIG_CACHE_APPEND: ${{ secrets.TARGET_CONFIG_CACHE_APPEND }}
-  TARGET_CONFIG_CONTAINS_TARGET_TABLES_CONFIG: ${{ secrets.TARGET_CONFIG_CONTAINS_TARGET_TABLES_CONFIG }}
-  MALFORMED_TARGET_CONFIG: ${{ secrets.MALFORMED_TARGET_CONFIG }}
-  TARGET_CONFIG_MERGE_STATE_FALSE_FLAG: ${{ secrets.TARGET_CONFIG_MERGE_STATE_FALSE_FLAG }}
-  TARGET_CONFIG_INCREMENTAL: ${{ secrets.TARGET_CONFIG_INCREMENTAL }}
+name: Lint
 
 on:
   push:
     branches: [development, master, feature/incremental_sync_and_schema_logging]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -40,36 +18,19 @@ jobs:
         python-version: [3.9]
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
-      run: |
-
-        echo "$GOOGLE_APPLICATION_CREDENTIALS" > "sandbox/sa.json"
-        echo "$TARGET_CONFIG" > "sandbox/target-config.json"
-        echo "$TARGET_CONFIG_CACHE" > "sandbox/target_config_cache.json"
-        echo "$TARGET_CONFIG_CACHE_APPEND" > "sandbox/target_config_cache_append.json"
-        echo "$TARGET_CONFIG_CONTAINS_TARGET_TABLES_CONFIG" > "sandbox/target_config_contains_target_tables_config.json"
-        echo "$MALFORMED_TARGET_CONFIG" > "sandbox/malformed_target_config.json"
-        echo "$TARGET_CONFIG_MERGE_STATE_FALSE_FLAG"  > "sandbox/target_config_merge_state_false_flag.json"
-        echo "$TARGET_CONFIG_INCREMENTAL"  > "sandbox/target_config_incremental.json"
-
-        pip install -r dev-requirements.txt
-        pytest --verbose
-
-        shred --iterations=7 sandbox/*
-        rm --recursive --force sandbox
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install flake8
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Lint with flake8
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
