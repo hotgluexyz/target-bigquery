@@ -2,7 +2,7 @@
 
 A [Singer](https://singer.io) target that writes data to Google BigQuery.
 
-[![Python package](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml/badge.svg)](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml)
+[![Lint](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml/badge.svg)](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml)
 
 `target-bigquery` works together with any other [Singer Tap] to move data from sources like [Braintree], [Freshdesk]
 and [Hubspot] to Google BigQuery.
@@ -48,14 +48,6 @@ user would. **-e** emulates how a user of the package would install requirements
 
 ```
 pip install -e .
-```
-
-**Additional development and testing requirements**
-
-Install additional dependencies required for development and testing.
-
-```
-pip install -r dev-requirements.txt
 ```
 
 ## How to use it
@@ -426,130 +418,19 @@ You can only set up partitioning.
 }
 ```
 
-## Unit tests set up
-
-Add the following files to *sandbox* directory under project root directory:
-
-- **sa.json** with GCP credential
-
-- **target-config.json**:
-
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}"
-  }
-  ```
-
-- **target_config_cache.json**:
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}",
-    "replication_method": "truncate",
-    "max_cache": 0
-  }
-  ```
-
-- **target_config_cache_append.json**:
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}",
-    "replication_method": "append",
-    "max_cache": 0
-  }
-  ```
-  OR
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}",
-    "max_cache": 0
-  }    
-  ```
-
-- **target_config_contains_target_tables_config.json**
-
-    - if you're running unit test from the unit test .py file:
-
-      ``` 
-      {
-        "project_id": "{your-project-id}",
-        "dataset_id": "{your_dataset_id}",
-        "table_config": "rsc/config/simple_stream_table_config.json"
-      }      
-      ```
-
-    - if you're running unit test from shell, for example:
-
-      ```bash
-      pytest --verbose tests/test_simplestream.py::TestSimpleStreamLoadJob::test_simple_stream_with_tables_config_passed_inside_target_config_file
-      ```
-
-      In this case, here's your config file, notice the difference in directory:
-      ``` 
-      {
-        "project_id": "{your-project-id}",
-        "dataset_id": "{your_dataset_id}",
-        "table_config": "tests/rsc/config/simple_stream_table_config.json"
-      }
-      ``` 
-
-- **malformed_target_config.json**:
-
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}",
-    "validate_records":  false
-  }     
-    ```
-
-- **target_config_merge_state_false_flag.json**:
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}",
-    "merge_state_messages": 0
-  }     
-    ```
-
-- **target_config_incremental.json**:
-
-  ```
-  {
-    "project_id": "{your-project-id}",
-    "dataset_id": "{your_dataset_id}",
-    "replication_method": "incremental"
-  }
-  ```
-
 ## Config files in this project
 
-This project has three locations with config files:
-
-1) **sample_config** - sample config files to illustrate points made in this README
-2) **tests/rsc/config** - config files necessary for unit tests
-3) **sandbox** - config files you create for unit tests. We didn't include them because they have sensitive info (e.g.,
-   GCP project names). Follow instructions in the section **Unit tests set up**, as well as comments in unit tests.
+This project has sample config files in the **sample_config** directory to illustrate points made in this README.
 
 ---
 
 [Singer Tap]: https://singer.io
-
 [Braintree]: https://github.com/singer-io/tap-braintree
-
 [Freshdesk]: https://github.com/singer-io/tap-freshdesk
-
 [Hubspot]: https://github.com/singer-io/tap-hubspot
-
 [tap-exchangeratesapi]: https://github.com/singer-io/tap-exchangeratesapi
-
 [python-mac]: http://docs.python-guide.org/en/latest/starting/install3/osx/
-
 [python-ubuntu]: https://www.digitalocean.com/community/tutorials/how-to-install-python-3-and-set-up-a-local-programming-environment-on-ubuntu-16-04
-
 [tap-recharge]: https://github.com/singer-io/tap-recharge
 
 ## Note about BigQuery table/columns names
