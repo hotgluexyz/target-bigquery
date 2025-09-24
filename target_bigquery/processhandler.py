@@ -85,7 +85,7 @@ class BaseProcessHandler(object):
         self.tables[msg.stream] = "{}{}{}".format(
                 self.table_prefix, msg.stream, self.table_suffix
             )
-        
+
         self.tables[msg.stream] = create_valid_bigquery_name(
             self.tables[msg.stream]
         ) if self.force_alphanumeric_table_names else self.tables[msg.stream]
@@ -195,7 +195,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         nr = cleanup_record(schema, msg.record)
 
         try:
-            nr = format_record_to_schema(nr, self.bq_schema_dicts[stream])
+            nr = format_record_to_schema(nr, self.bq_schema_dicts[stream]) # --> We might need this
         except Exception as e:
             extra={"record" : msg.record, "schema": schema, "bq_schema": bq_schema}
             self.logger.critical(f"Cannot format a record for stream {msg.stream} to its corresponding BigQuery schema. Details: {extra}")
@@ -207,9 +207,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
         validator = self.validators[stream]
         if self.validate_records:
             try:
-                validator.validate(msg.record, schema)
+                validator.validate(msg.record, schema) # --> This is pointless, we are not writing the raw msg.record
             except Exception as e:
-                validator.validate(nr, schema)
+                validator.validate(nr, schema) # THIS IS DEFINITELY NOT NEEDED, why would it be validated again, it just created it above with `format_record_to_schema`, why would it not comply
 
         if self.add_metadata_columns:
             nr["_time_extracted"] = msg.time_extracted.isoformat() \
@@ -310,8 +310,13 @@ class LoadJobProcessHandler(BaseProcessHandler):
             # If a row in the table to be updated joins with more than one row from the FROM clause,
             # then the query generates the following runtime error: UPDATE/MERGE must match at most one source row for each target row.
             for stream, tmp_table_name in loaded_tmp_tables:
+                # We will definitely need this function
                 self.create_missing_columns(stream)
                 incremental_success = False
+
+                # table-configs dictate per table replication method (and override the top level truncate and incremental)
+                # This logic will need to happen in our new implementation
+                # if in our new implementation, the we encounter incremental, we should load the parquet file into a temp table and then do a merge
                 instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
                 instance_increment = self.incremental if not instance_truncate else False
 
@@ -413,6 +418,8 @@ class LoadJobProcessHandler(BaseProcessHandler):
         :return:
         """
         logger = self.logger
+
+        # These must be implemented in our new implementation
         partition_field = table_config.get("partition_field", None)
         cluster_fields = table_config.get("cluster_fields", None)
         force_fields = table_config.get("force_fields", {})
