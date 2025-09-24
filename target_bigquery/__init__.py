@@ -116,10 +116,7 @@ def main():
         #
         #
         # 0. The executor will convert the data.singer to a series of parquet files in the executors/target-output directory
-        #       --> An undesirable side effect of this is that our disk usage will increase to be data.singer size + parquet files size, as opposed to just the data.singer size.
-        #           --> This could be an issue for large datasets. We could only avoid this if we somehow deleted the processed records from data.singer every N lines in a batch like way.
-        #               --> Before we try and optimize this, we should check if it is a problem since parquet files are very small compared to data.singer.
-        #       --> IMPORTANT: For us to avoid doing the parquet construction in this code base, we will ned to make some changes to target-parquet.
+                #       --> IMPORTANT: For us to avoid doing the parquet construction in this code base, we will ned to make some changes to target-parquet.
         #           --> We need to guarantee that the schema provided by the parquet files is enough to create the schema in big query, which might not be true, for the following reasons:
         #               - We do some schema simplification in our current code, and target-parquet does not (double check this),
         #               - We support more types here than in target-parquet. Our supported types
@@ -138,53 +135,97 @@ def main():
         #                              "bq-bigdecimal": "BIGDECIMAL"
         #                   }
         #           --> We already know about force_fields, metadata columns, primarykey, and key properties, and validation, which we have a plan to handle (see below)
+
+        # 1-pass centralized approach
+        #
+        # An undesirable side effect of this approach is that our disk usage will increase to be data.singer size + parquet files size, as opposed to just the data.singer size.
+        # This could be an issue for large datasets. We could only avoid this if we somehow deleted the processed records from data.singer every N lines in a batch like way.
+        # Before we try and optimize this, we should check if it is a problem since parquet files are very small compared to data.singer.
+
+        # number of rows before writing out from memory to parquet
+        STREAM_ROW_CACHE_SIZE = 10000
+
+        # These dicts could and should be clearly typed
+        config = {
+            "should_validate": True,
+            "add_metadata_columns": True,
+            # This stuff will be set in step 1, pulled from the target-tables-config
+            "tables": {
+            },
+        }
+
+        # This stuff will be set when we encounter a schema message for a given stream_name for the first time.
+        streams = {
+            "stream_name": {
+                "validator": "https://python-jsonschema.readthedocs.io/en/latest/api/jsonschema/protocols/#jsonschema.protocols.Validator",
+                "table_name": "",
+                "key_properties": "",
+                "json_schema": "is just msg.schema, we use when we call validator.validate",
+                "big_query_schema": "a list of BigQuery SchemaFields, which represents one BigQuery table, used for creating_missing_columns on stream end",
+                "big_query_schema_dict": "created by `_build_bq_schema_dict`, used by Schema.format_record_to_schema on record messages"
+            }
+        }
+
+        rows = {
+            "stream_name": ["array of pyarrow rows, flushed at `STREAM_ROW_CACHE_SIZE`"]
+        }
+
+        #
         # 1. We process target-tables-config.json and target-config.json
+        #       --> We determine whether to validate and whether to add metadata columns
         #       --> We determine each streams force fields
         #       --> We determine each streams partition fields
         #       --> We determine each streams cluster fields
         #       --> We determine each streams replication method
         #       --> We determine each streams "key_properties", aka their required fields
         #       --> We read the table prefix and table suffix from the target-config.json
+        #
         # 2. We iterate over the data.singer file
-
-
-
-        # 2. We use `bq load` to load the parquet files into big query
-        #       --> For each parquet file (AKA stream):
-        #           --> We compare the schema in parquet to the schema in big query, generate a diff, and issue the alter table statements we need
-        #           --> We load the file into google cloud storage
-        #           --> We use the partition fields, cluster fields, and replication method above to determine the job load config
-        #           --> We load the parquet files into big query from google cloud storage
-        #           --> If append or truncate, we issue a simple load job to load the parquet files into big query
-        #           --> Else if incremental, we load the parquet files into a temp table and then do a merge, ensuring that we clean up the temp table after the merge.
-        #       --> IMPORTANT: we will lose the following behavior by not doing a pass over ever message here:
-        #           -->  We lose merging of state messages. Maybe we don't need to support them. We certainly don't need them to issue tmp table loads anymore. For us, merge_state_messages will always be True, so if we do support it, we use the `State` class
-        #               --> POSSIBLE SOLUTIONS: Add this to target-parquet, drop support, or process in the additional pass over the data.singer file
-        #           -->  We lose validation of records.
-        #       --> This option will drop support for `force_fields` provided by table config, since these are applied at schema message processing time when we construct a stream schema
-        #               --> POSSIBLE SOLUTIONS: Add this to target-parquet, or process in the additional pass over the data.singer file
-        #       --> This option will drop support for `force_alphanumeric_table_names`, since this is applied at schema message processing time
-        #               --> RECOMMENDED SOLUTION: Add this to target-parquet
-        #       --> This option will drop support for `add_metadata_columns`, since this is applied at schema message processing time (and also written to at record message processing time)
-        #               --> RECOMMENDED SOLUTION: Add this to target-parquet
-        #       --> This option will drop support for `validate_records`, since this is applied at record message processing time (maybe these are things that we also want to add to the target-parquet)
-        #           --> We also lose `format_record_to_schema`
-        #           --> We also lose `cleanup_record`
-        #           --> We also lose `schema_simplification`
-        #           --> POSSIBLE SOLUTIONS: target-parquet has validation, extend it/replace it. Add option to ignore, or process in the additional pass over the data.singer file
-        #       --> For all these options, if we do not add support to target-parquet, we will need to do one pass over the data.singer file to them
-        #           --> For adding metadata columns, this would mean we would need to implement batched processing to limit file writes
+        #
+        #   for each message in data.singer:
+        #     if message is a schema message:
+        #         if we have not seen this schema before:
+        #             assign streams.table_name (if force_alphanumeric_table_names we convert it,
+        #             assign streams.validator if we are configured to validate
+        #             assign streams.key_properties
+        #             assign streams.json_schema
+        #             assign streams.big_query_schema ~= `build_schema(json_schema_simplified, add_metadata,force_fields)`
+        #             assign streams.big_query_schema_dict
+        #             loggger.info(f"{msg.stream} BigQuery schema {schema}")
+        #
+        #       else if message is a record message:
+        #           stream_name = msg.stream
+        #           if stream not in self.schemas:
+        #              raise Exception(f"A record for stream {msg.stream} was encountered before a corresponding schema")
+        #           schema = stream[stream_name].schema
+        #           if we are configured to validate
+        #               stream[stream_name].validator.validate(msg.record, schema)
+        #           nr = cleanup_record(schema, msg.record)
+        #           nr = format_record_to_schema(nr, self.bq_schema_dicts[stream_name])
+        #           if add_metadata_columns:
+        #               add metadata
+        #
+        #           # This is new stuff for this implementation
+        #           pa_row = convert_to_pyarrow_row(nr)
+        #           rows[stream_name] = pa_row
+        #           if len(rows[stream_name]) > STREAM_ROW_CACHE_SIZE:
+        #               flush to parquet file
+        #
+        #       else if message is a state message:
+        #         we process the state message
         #           --> For state messages, this should be pretty easy to process all state messages in the pass the way we are now
-        #           --> For validation/cleaning, we would have to do it pretty much the way we are now on a per record message basis
-        #           --> For alphanumeric table names, we would have to do it pretty much the way we are now on a per schema message basis
+        #
+        # 3. We use `bq load` to load the parquet files into big query
+        #       1. For each parquet file (AKA stream), we:
+        #           - compare the bq_query_schema[stream_name] with the schema of the remote bigquery target table,
+        #             add missing columns using the existing `create_missing_columns` method OR create the table if it doesn't exist.
+        #
+        #       2. We load all the files into google cloud storage in parallel (perhaps with a limit of some number of files at a time))
 
-        # DECISION: We will not do above approach. Instead we will centralize the processing of the data.singer into the target-bigquery code base, copying whatever code we need from target-parquet:
-        # DECISION: We will try to avoid doing multiple passes over the data.singer file, and instead do one pass that is aware of the schema messages and record messages.
-        # DECISION: We will keep the validation, simplifcation, and format (see in code notes for some more details on what we drop)
-        # DECISION: We will make a separate branch
-        # TODO: Come to an understanding on how primary key is handled currently,
-        # TODO: Rewrite algo with one pass
-
+        #       3. We use `bq load` to load the parquet files into bigquery from google cloud sorage
+        #           - Use the partition fields, cluster fields, and replication method from the target-tables-config.json to determine the job load config
+        #           - If append or truncate, we issue a simple load job to load the parquet files into big query
+        #           - Else if incremental, we load the parquet files into a temp table and then do a merge, ensuring that we clean up the temp table after the merge.
 
         # In our existing use of target-parquet in our executor, since we are not passing the cli option, processhandler will always be the default of partial-load-job.
         # max_cache is not relevant to our new implementation
