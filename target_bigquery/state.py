@@ -1,4 +1,4 @@
-from singer.statediff import paths, diff, Add, Change, Remove
+from singer.statediff import diff, Add, Change, Remove
 
 
 class State(dict):
