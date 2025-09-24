@@ -92,7 +92,7 @@ class BaseProcessHandler(object):
 
         self.schemas[msg.stream] = msg.schema
         validator_cls = validator_for(msg.schema)
-        validator_cls.check_schema(msg.schema)
+        validator_cls.check_schema(msg.schema) # raises SchemaError if invalid
         self.validators[msg.stream] = validator_cls(msg.schema)
         self.key_properties[msg.stream] = msg.key_properties
 
@@ -505,39 +505,3 @@ class PartialLoadJobProcessHandler(LoadJobProcessHandler):
 
         self._do_temp_table_based_load(rows)
         yield self.STATE
-
-
-class BookmarksStatePartialLoadJobProcessHandler(PartialLoadJobProcessHandler):
-
-    def __init__(self, logger, **kwargs):
-        super(BookmarksStatePartialLoadJobProcessHandler, self).__init__(logger, **kwargs)
-
-        self.STATE_HANDLER = kwargs.get("state_handler")
-        self.EMITTED_STATE = self.STATE_HANDLER(**self.INIT_STATE)
-
-    def handle_state_message(self, msg):
-        assert isinstance(msg, singer.StateMessage)
-        for s in super(PartialLoadJobProcessHandler, self).handle_state_message(msg):
-            yield s
-
-        if sum([self.rows[s].tell() for s in self.rows.keys()]) > self.max_cache:
-            rows = {s: self.rows[s] for s in self.rows.keys() if self.rows[s].tell() > 0}
-            for stream in rows.keys():
-                self._do_temp_table_based_load({stream: rows[stream]})
-
-                self.EMITTED_STATE["bookmarks"][stream] = self.STATE["bookmarks"][stream]
-
-                yield self.EMITTED_STATE
-
-    def on_stream_end(self):
-        rows = {s: self.rows[s] for s in self.rows.keys() if self.rows[s].tell() > 0}
-        if len(rows) == 0:
-            yield self.STATE
-            return
-
-        for stream in rows.keys():
-            self._do_temp_table_based_load({stream: rows[stream]})
-
-            self.EMITTED_STATE["bookmarks"][stream] = self.STATE["bookmarks"][stream]
-
-            yield self.EMITTED_STATE
