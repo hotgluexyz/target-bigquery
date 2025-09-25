@@ -3,7 +3,7 @@ import singer
 
 from google.cloud.bigquery import SchemaField
 from jsonschema.validators import validator_for
-from target_bigquery.config import TargetConfig, TablesConfig
+from target_bigquery.config import TargetConfig, TablesConfig, TableConfig
 from target_bigquery.schema import build_schema, create_valid_bigquery_name
 from target_bigquery.simplify_json_schema import simplify
 from target_bigquery.validate_json_schema import (
@@ -66,9 +66,9 @@ class SingerProcessor:
 
         self.table_names[stream_name] = build_table_name(
             stream_name,
-            self.target_config.get("table_prefix", ""),
-            self.target_config.get("table_suffix", ""),
-            self.target_config.get("force_alphanumeric_table_names", False),
+            self.target_config.table_prefix,
+            self.target_config.table_suffix,
+            self.target_config.force_alphanumeric_table_names,
         )
 
         self.json_schemas[stream_name] = message.schema
@@ -89,10 +89,10 @@ class SingerProcessor:
         schema = build_schema(
             schema=schema_simplified,
             key_properties=self.key_properties[stream_name],
-            add_metadata=self.target_config.get("add_metadata_columns", True),
-            force_fields=self.tables_config["streams"]
-            .get(stream_name, {})
-            .get("force_fields", {}),
+            add_metadata=self.target_config.add_metadata_columns,
+            force_fields=self.tables_config.streams.get(
+                stream_name, TableConfig()
+            ).force_fields,
         )
         self.big_query_schemas[stream_name] = schema
         self.big_query_schema_dicts[stream_name] = build_bq_schema_dict(schema)

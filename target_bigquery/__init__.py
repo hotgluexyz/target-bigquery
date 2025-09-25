@@ -7,7 +7,7 @@ import singer
 import sys
 import traceback
 
-from target_bigquery.config import TargetConfig, TablesConfig, apply_config_defaults
+from target_bigquery.config import TargetConfig, TablesConfig
 from target_bigquery.process import SingerProcessor
 from target_bigquery.state import State, LiteralState
 from target_bigquery.utils import emit_state
@@ -67,16 +67,17 @@ def main():
 
     # Process target config file
     with open(flags.config) as f:
-        config: TargetConfig = json.load(f)
-    config = apply_config_defaults(config)
-    state_handler = State if config["merge_state_messages"] else LiteralState
+        config_dict = json.load(f)
+    config = TargetConfig(**config_dict)
+    state_handler = State if config.merge_state_messages else LiteralState
 
     # Process target tables config file
-    table_config_path = flags.tables or config.get("table_config")
-    tables_config: TablesConfig = {}
+    table_config_path = flags.tables or config.table_config
+    tables_config = TablesConfig()
     if table_config_path:
         with open(table_config_path) as f:
-            tables_config = json.load(f)
+            tables_config_dict = json.load(f)
+        tables_config = TablesConfig(**tables_config_dict)
 
     # Load initial state
     state = None
@@ -86,7 +87,7 @@ def main():
 
     tap_stream = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     client, dataset = ensure_dataset(
-        config["project_id"], config["dataset_id"], config["location"]
+        config.project_id, config.dataset_id, config.location
     )
 
     try:
