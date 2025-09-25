@@ -24,4 +24,3 @@ def emit_state(state):
             fn = os.environ.get("TARGET_BIGQUERY_STATE_FILE", None)
             with open(fn, "a") as f:
                 f.write("{}\n".format(line))
-

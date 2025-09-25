@@ -6,14 +6,18 @@ from jsonschema.validators import validator_for
 from target_bigquery.config import TargetConfig, TablesConfig
 from target_bigquery.schema import build_schema, create_valid_bigquery_name
 from target_bigquery.simplify_json_schema import simplify
-from target_bigquery.validate_json_schema import validate_json_schema_completeness, \
-    check_schema_for_dupes_in_field_names
+from target_bigquery.validate_json_schema import (
+    validate_json_schema_completeness,
+    check_schema_for_dupes_in_field_names,
+)
 from typing import Any, Dict, List
 
 logger = singer.get_logger()
 
 
-def build_table_name(stream_name: str, prefix: str, suffix: str, force_alphanumeric_table_names: bool):
+def build_table_name(
+    stream_name: str, prefix: str, suffix: str, force_alphanumeric_table_names: bool
+):
     table_name = "{}{}{}".format(prefix, stream_name, suffix)
     if force_alphanumeric_table_names:
         return create_valid_bigquery_name(table_name)
@@ -64,7 +68,7 @@ class SingerProcessor:
             stream_name,
             self.target_config.get("table_prefix", ""),
             self.target_config.get("table_suffix", ""),
-            self.target_config.get("force_alphanumeric_table_names", False)
+            self.target_config.get("force_alphanumeric_table_names", False),
         )
 
         self.json_schemas[stream_name] = message.schema
@@ -77,8 +81,7 @@ class SingerProcessor:
         self.validators[stream_name] = validator_cls(message.schema)
         validate_json_schema_completeness(self.json_schemas[stream_name])
         check_schema_for_dupes_in_field_names(
-            stream_name=stream_name,
-            schema=self.json_schemas[stream_name]
+            stream_name=stream_name, schema=self.json_schemas[stream_name]
         )
 
         # BigQuery schema generation
@@ -87,12 +90,16 @@ class SingerProcessor:
             schema=schema_simplified,
             key_properties=self.key_properties[stream_name],
             add_metadata=self.target_config.get("add_metadata_columns", True),
-            force_fields=self.tables_config["streams"].get(stream_name, {}).get("force_fields", {}))
+            force_fields=self.tables_config["streams"]
+            .get(stream_name, {})
+            .get("force_fields", {}),
+        )
         self.big_query_schemas[stream_name] = schema
         self.big_query_schema_dicts[stream_name] = build_bq_schema_dict(schema)
 
-        logger.info(f"Processed SCHEMA message for stream: {message.stream}. BigQuery schema: {schema}")
-
+        logger.info(
+            f"Processed SCHEMA message for stream: {message.stream}. BigQuery schema: {schema}"
+        )
 
     def handle_record_message(self, message: singer.RecordMessage):
         stream_name = message.stream
@@ -112,7 +119,6 @@ class SingerProcessor:
         # if len(rows[stream_name]) > STREAM_ROW_CACHE_SIZE:
         #     flush to parquet file
         pass
-
 
     def handle_state_message(self, message: singer.StateMessage):
         pass

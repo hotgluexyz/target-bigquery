@@ -1,17 +1,30 @@
 """
 the purpose of this module is to convert JSON schema to BigQuery schema.
 """
+
 import re
 
-from target_bigquery.simplify_json_schema import BQ_DECIMAL_SCALE_MAX, BQ_BIGDECIMAL_SCALE_MAX, \
-    BQ_DECIMAL_MAX_PRECISION_INCREMENT, BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
+from target_bigquery.simplify_json_schema import (
+    BQ_DECIMAL_SCALE_MAX,
+    BQ_BIGDECIMAL_SCALE_MAX,
+    BQ_DECIMAL_MAX_PRECISION_INCREMENT,
+    BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT,
+)
 
 from google.cloud.bigquery import SchemaField
 from pendulum import parse
 
 METADATA_FIELDS = {
-    "_time_extracted": {"type": ["null", "string"], "format": "date-time", "bq_type": "timestamp"},
-    "_time_loaded": {"type": ["null", "string"], "format": "date-time", "bq_type": "timestamp"}
+    "_time_extracted": {
+        "type": ["null", "string"],
+        "format": "date-time",
+        "bq_type": "timestamp",
+    },
+    "_time_loaded": {
+        "type": ["null", "string"],
+        "format": "date-time",
+        "bq_type": "timestamp",
+    },
 }
 
 
@@ -65,20 +78,26 @@ def create_valid_bigquery_name(column_name: str) -> str:
     column_name = column_name.strip()
 
     # Replace all non-alphanumeric characters (excluding underscore) with underscores
-    column_name = re.sub(r'[^a-zA-Z0-9_]', '_', column_name)
+    column_name = re.sub(r"[^a-zA-Z0-9_]", "_", column_name)
 
     # Ensure the column name starts with a letter or underscore
-    if not re.match(r'^[A-Za-z_]', column_name):
-        column_name = '_' + column_name
+    if not re.match(r"^[A-Za-z_]", column_name):
+        column_name = "_" + column_name
 
     # Truncate to 300 characters if necessary
     column_name = column_name[:300]
 
     # Avoid reserved prefixes
-    reserved_prefixes = ['_TABLE_', '_FILE_', '_PARTITION_', '_ROW_TIMESTAMP_', '__ROOT__']
+    reserved_prefixes = [
+        "_TABLE_",
+        "_FILE_",
+        "_PARTITION_",
+        "_ROW_TIMESTAMP_",
+        "__ROOT__",
+    ]
     for prefix in reserved_prefixes:
         if column_name.startswith(prefix):
-            column_name = '_' + column_name
+            column_name = "_" + column_name
 
     return column_name
 
@@ -136,18 +155,19 @@ def prioritize_one_data_type_from_multiple_ones_in_any_of(field_property):
     OUTPUT of the function is one JSON data type with the top priority
     """
 
-    prioritization_dict = {"string": 1,
-                           "number": 2,
-                           "integer": 3,
-                           "boolean": 4,
-                           "object": 5,
-                           "array": 6,
-                           }
+    prioritization_dict = {
+        "string": 1,
+        "number": 2,
+        "integer": 3,
+        "boolean": 4,
+        "object": 5,
+        "array": 6,
+    }
 
     any_of_data_types = {}
 
-    for i in range(0, len(field_property['anyOf'])):
-        data_type = field_property['anyOf'][i]['type'][0]
+    for i in range(0, len(field_property["anyOf"])):
+        data_type = field_property["anyOf"][i]["type"][0]
 
         any_of_data_types.update({data_type: prioritization_dict[data_type]})
 
@@ -162,33 +182,41 @@ def convert_field_type(field_property):
     :return: BigQuery SchemaField field_type
     """
 
-    conversion_dict = {"string": "STRING",
-                       "number": "FLOAT",
-                       "integer": "INTEGER",
-                       "boolean": "BOOLEAN",
-                       "date-time": "TIMESTAMP",
-                       "date": "DATE",
-                       "time": "TIME",
-                       "object": "RECORD",
-                       "array": "RECORD",
-                       "bq-geography": "GEOGRAPHY",
-                       "bq-decimal": "DECIMAL",
-                       "bq-bigdecimal": "BIGDECIMAL"
-                       }
+    conversion_dict = {
+        "string": "STRING",
+        "number": "FLOAT",
+        "integer": "INTEGER",
+        "boolean": "BOOLEAN",
+        "date-time": "TIMESTAMP",
+        "date": "DATE",
+        "time": "TIME",
+        "object": "RECORD",
+        "array": "RECORD",
+        "bq-geography": "GEOGRAPHY",
+        "bq-decimal": "DECIMAL",
+        "bq-bigdecimal": "BIGDECIMAL",
+    }
 
     if "anyOf" in field_property:
 
-        prioritized_data_type = prioritize_one_data_type_from_multiple_ones_in_any_of(field_property)
+        prioritized_data_type = prioritize_one_data_type_from_multiple_ones_in_any_of(
+            field_property
+        )
 
         field_type_bigquery = conversion_dict[prioritized_data_type]
 
-    elif field_property.get('multipleOf') and conversion_dict[field_property["format"]] == "FLOAT":
+    elif (
+        field_property.get("multipleOf")
+        and conversion_dict[field_property["format"]] == "FLOAT"
+    ):
 
-        scale = determine_precision_and_scale_for_decimal_or_bigdecimal(field_property)[1]
+        scale = determine_precision_and_scale_for_decimal_or_bigdecimal(field_property)[
+            1
+        ]
 
         # edge case, taken from this documentation:
         # https://json-schema.org/understanding-json-schema/reference/numeric.html
-        if type(field_property.get('multipleOf')) == int:
+        if type(field_property.get("multipleOf")) == int:
             field_type_bigquery = "INTEGER"
 
         # if scale has been determined
@@ -203,9 +231,9 @@ def convert_field_type(field_property):
 
         field_type_bigquery = conversion_dict[field_property["format"]]
 
-    elif (("items" in field_property) and ("properties" not in field_property["items"])):
+    elif ("items" in field_property) and ("properties" not in field_property["items"]):
 
-        field_type_bigquery = conversion_dict[field_property['items']['type'][0]]
+        field_type_bigquery = conversion_dict[field_property["items"]["type"][0]]
 
     else:
 
@@ -222,22 +250,24 @@ def determine_field_mode(field_property):
     """
     if "items" in field_property:
 
-        field_mode = 'REPEATED'
+        field_mode = "REPEATED"
 
     else:
 
-        field_mode = 'NULLABLE'
+        field_mode = "NULLABLE"
 
     return field_mode
 
 
 def replace_nullable_mode_with_required(schema_field_input):
-    schema_field_updated = SchemaField(name=schema_field_input.name,
-                                       field_type=schema_field_input.field_type,
-                                       mode='REQUIRED',
-                                       description=schema_field_input.description,
-                                       fields=schema_field_input.fields,
-                                       policy_tags=schema_field_input.policy_tags)
+    schema_field_updated = SchemaField(
+        name=schema_field_input.name,
+        field_type=schema_field_input.field_type,
+        mode="REQUIRED",
+        description=schema_field_input.description,
+        fields=schema_field_input.fields,
+        policy_tags=schema_field_input.policy_tags,
+    )
 
     return schema_field_updated
 
@@ -271,20 +301,28 @@ def determine_precision_and_scale_for_decimal_or_bigdecimal(field_property):
 
     if "multipleOf" in field_property.keys():
 
-        match_1 = re.search(r'\.(.*?)$', str(field_property.get('multipleOf')))
-        match_2 = re.search(r'(?i)1e\-(.*?)$', str(field_property.get('multipleOf')))
+        match_1 = re.search(r"\.(.*?)$", str(field_property.get("multipleOf")))
+        match_2 = re.search(r"(?i)1e\-(.*?)$", str(field_property.get("multipleOf")))
         # (?i) ignores case sensitivity
         # https://stackoverflow.com/questions/9655164/regex-ignore-case-sensitivity
 
         if match_1:  # if "multipleOf" is written as a regular human-readable float
             match = match_1.group(1)
             scale = min(len(match), BQ_BIGDECIMAL_SCALE_MAX)
-            precision = scale + BQ_DECIMAL_MAX_PRECISION_INCREMENT if scale <= BQ_DECIMAL_SCALE_MAX else scale + BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
+            precision = (
+                scale + BQ_DECIMAL_MAX_PRECISION_INCREMENT
+                if scale <= BQ_DECIMAL_SCALE_MAX
+                else scale + BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
+            )
 
         elif match_2:  # if "multipleOf" is written in scientific notation
             match = match_2.group(1)
             scale = min(int(match), BQ_BIGDECIMAL_SCALE_MAX)
-            precision = scale + BQ_DECIMAL_MAX_PRECISION_INCREMENT if scale <= BQ_DECIMAL_SCALE_MAX else scale + BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
+            precision = (
+                scale + BQ_DECIMAL_MAX_PRECISION_INCREMENT
+                if scale <= BQ_DECIMAL_SCALE_MAX
+                else scale + BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
+            )
 
     return precision, scale
 
@@ -296,50 +334,59 @@ def build_field(field_name, field_property):
     :return: one BigQuery nested SchemaField
     """
 
-    if not ("items" in field_property and "properties" in field_property["items"]) and not (
-            "properties" in field_property):
+    if not (
+        "items" in field_property and "properties" in field_property["items"]
+    ) and not ("properties" in field_property):
 
         field_type = convert_field_type(field_property)
 
-        precision, scale = determine_precision_and_scale_for_decimal_or_bigdecimal(field_property) if field_type in [
-            "DECIMAL", "BIGDECIMAL"] else (None, None)
+        precision, scale = (
+            determine_precision_and_scale_for_decimal_or_bigdecimal(field_property)
+            if field_type in ["DECIMAL", "BIGDECIMAL"]
+            else (None, None)
+        )
 
-        return (SchemaField(name=create_valid_bigquery_name(field_name),
-                            field_type=field_type,
-                            mode=determine_field_mode(field_property),
-                            description=None,
-                            fields=(),
-                            policy_tags=None,
-                            precision=precision,
-                            scale=scale
-                            )
-                )
+        return SchemaField(
+            name=create_valid_bigquery_name(field_name),
+            field_type=field_type,
+            mode=determine_field_mode(field_property),
+            description=None,
+            fields=(),
+            policy_tags=None,
+            precision=precision,
+            scale=scale,
+        )
 
-    elif ("items" in field_property and "properties" in field_property["items"]) or ("properties" in field_property):
+    elif ("items" in field_property and "properties" in field_property["items"]) or (
+        "properties" in field_property
+    ):
 
         processed_subfields = []
 
         field_type = convert_field_type(field_property)
 
-        precision, scale = determine_precision_and_scale_for_decimal_or_bigdecimal(field_property) if field_type in [
-            "DECIMAL", "BIGDECIMAL"] else (None, None)
+        precision, scale = (
+            determine_precision_and_scale_for_decimal_or_bigdecimal(field_property)
+            if field_type in ["DECIMAL", "BIGDECIMAL"]
+            else (None, None)
+        )
 
         # https://www.w3schools.com/python/ref_dictionary_get.asp
-        for subfield_name, subfield_property in field_property.get("properties",
-                                                                   field_property.get("items", {}).get("properties")
-                                                                   ).items():
+        for subfield_name, subfield_property in field_property.get(
+            "properties", field_property.get("items", {}).get("properties")
+        ).items():
             processed_subfields.append(build_field(subfield_name, subfield_property))
 
-        return (SchemaField(name=create_valid_bigquery_name(field_name),
-                            field_type=field_type,
-                            mode=determine_field_mode(field_property),
-                            description=None,
-                            fields=processed_subfields,
-                            policy_tags=None,
-                            precision=precision,
-                            scale=scale
-                            )
-                )
+        return SchemaField(
+            name=create_valid_bigquery_name(field_name),
+            field_type=field_type,
+            mode=determine_field_mode(field_property),
+            description=None,
+            fields=processed_subfields,
+            policy_tags=None,
+            precision=precision,
+            scale=scale,
+        )
 
 
 def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}):
@@ -360,14 +407,18 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
 
     schema_bigquery = []
 
-    for field_name, field_property in schema.get("properties", schema.get("items", {}).get("properties", {})).items():
+    for field_name, field_property in schema.get(
+        "properties", schema.get("items", {}).get("properties", {})
+    ).items():
 
         if field_name in force_fields:
 
-            next_field = (
-                SchemaField(field_name, force_fields[field_name]["type"],
-                            force_fields[field_name].get("mode", "nullable"),
-                            force_fields[field_name].get("description", None), ())
+            next_field = SchemaField(
+                field_name,
+                force_fields[field_name]["type"],
+                force_fields[field_name].get("mode", "nullable"),
+                force_fields[field_name].get("description", None),
+                (),
             )
 
         else:
@@ -382,13 +433,16 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
     if add_metadata:
 
         for field_name in METADATA_FIELDS:
-            schema_bigquery.append(SchemaField(name=field_name,
-                                               field_type=METADATA_FIELDS[field_name]["bq_type"],
-                                               mode='NULLABLE',
-                                               description=None,
-                                               fields=(),
-                                               policy_tags=None)
-                                   )
+            schema_bigquery.append(
+                SchemaField(
+                    name=field_name,
+                    field_type=METADATA_FIELDS[field_name]["bq_type"],
+                    mode="NULLABLE",
+                    description=None,
+                    fields=(),
+                    policy_tags=None,
+                )
+            )
 
     return schema_bigquery
 
@@ -396,16 +450,19 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
 def numeric_converter(value):
     if "inf" in str(value):
         return value
-    elif value!="":
+    elif value != "":
         return float(value)
 
+
 def integer_converter(value):
-    if value!="":
+    if value != "":
         return int(value)
 
+
 def bool_converter(value):
-    if value!="":
+    if value != "":
         return bool(value)
+
 
 def datetime_converter(value):
     try:
@@ -429,21 +486,22 @@ def format_record_to_schema(record, bq_schema):
     :return: JSON record/data, where the data types match JSON schema
     """
 
-    conversion_dict = {"BYTES": bytes,
-                       "STRING": str,
-                       "TIME": str,
-                       "TIMESTAMP": datetime_converter,
-                       "DATE": datetime_converter,
-                       "DATETIME": datetime_converter,
-                       "FLOAT": numeric_converter,
-                       "NUMERIC": numeric_converter,
-                       "BIGNUMERIC": numeric_converter,
-                       "INTEGER": integer_converter,
-                       "BOOLEAN": bool_converter,
-                       "GEOGRAPHY": str,
-                       "DECIMAL": str,
-                       "BIGDECIMAL": str
-                       }
+    conversion_dict = {
+        "BYTES": bytes,
+        "STRING": str,
+        "TIME": str,
+        "TIMESTAMP": datetime_converter,
+        "DATE": datetime_converter,
+        "DATETIME": datetime_converter,
+        "FLOAT": numeric_converter,
+        "NUMERIC": numeric_converter,
+        "BIGNUMERIC": numeric_converter,
+        "INTEGER": integer_converter,
+        "BOOLEAN": bool_converter,
+        "GEOGRAPHY": str,
+        "DECIMAL": str,
+        "BIGDECIMAL": str,
+    }
 
     if isinstance(record, list):
         new_record = []

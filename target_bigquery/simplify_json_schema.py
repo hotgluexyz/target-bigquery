@@ -12,18 +12,18 @@ from jsonschema import Draft4Validator
 from jsonschema.exceptions import SchemaError
 from target_bigquery.exceptions import JSONSchemaError
 
-NULL = 'null'
-OBJECT = 'object'
-ARRAY = 'array'
-INTEGER = 'integer'
-NUMBER = 'number'
-BOOLEAN = 'boolean'
-STRING = 'string'
-DATE_TIME_FORMAT = 'date-time'
-DATE_FORMAT = 'date'
-BQ_GEOGRAPHY = 'bq-geography'
-BQ_DECIMAL = 'bq-decimal'
-BQ_BIGDECIMAL = 'bq-bigdecimal'
+NULL = "null"
+OBJECT = "object"
+ARRAY = "array"
+INTEGER = "integer"
+NUMBER = "number"
+BOOLEAN = "boolean"
+STRING = "string"
+DATE_TIME_FORMAT = "date-time"
+DATE_FORMAT = "date"
+BQ_GEOGRAPHY = "bq-geography"
+BQ_DECIMAL = "bq-decimal"
+BQ_BIGDECIMAL = "bq-bigdecimal"
 
 # https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types
 BQ_DECIMAL_SCALE_MAX = 9
@@ -40,7 +40,7 @@ _PYTHON_TYPE_TO_JSON_SCHEMA = {
     bool: BOOLEAN,
     str: STRING,
     type(None): NULL,
-    decimal.Decimal: NUMBER
+    decimal.Decimal: NUMBER,
 }
 
 
@@ -51,9 +51,11 @@ def python_type(x):
     :return:
     """
     if not type(x) in _PYTHON_TYPE_TO_JSON_SCHEMA:
-        raise JSONSchemaError('Unknown type `{}`. Cannot translate to JSONSchema type.'.format(
-            str(type(x))
-        ))
+        raise JSONSchemaError(
+            "Unknown type `{}`. Cannot translate to JSONSchema type.".format(
+                str(type(x))
+            )
+        )
     return _PYTHON_TYPE_TO_JSON_SCHEMA[type(x)]
 
 
@@ -63,7 +65,7 @@ def get_type(schema):
     :param schema: dict, JSON Schema
     :return: [string ...]
     """
-    t = schema.get('type', None)
+    t = schema.get("type", None)
     if not t:
         return [OBJECT]
 
@@ -93,18 +95,15 @@ def simple_type(schema):
     t = get_type(schema)
 
     if is_datetime(schema):
-        return {'type': t,
-                'format': DATE_TIME_FORMAT}
+        return {"type": t, "format": DATE_TIME_FORMAT}
 
     if is_date(schema):
-        return {'type': t,
-                'format': DATE_FORMAT}
+        return {"type": t, "format": DATE_FORMAT}
 
     if is_bq_geography(schema):
-        return {'type': t,
-                'format': BQ_GEOGRAPHY}
+        return {"type": t, "format": BQ_GEOGRAPHY}
 
-    return {'type': t}
+    return {"type": t}
 
 
 def _get_ref(schema, paths):
@@ -112,7 +111,9 @@ def _get_ref(schema, paths):
         return schema
 
     if not paths[0] in schema:
-        raise JSONSchemaError('`$ref` "{}" not found in provided JSON Schema'.format(paths[0]))
+        raise JSONSchemaError(
+            '`$ref` "{}" not found in provided JSON Schema'.format(paths[0])
+        )
 
     return _get_ref(schema[paths[0]], paths[1:])
 
@@ -127,11 +128,10 @@ def get_ref(schema, ref):
     """
 
     # Explicitly only allow absolute internally defined $ref's
-    if not re.match(r'^#/.*', ref):
+    if not re.match(r"^#/.*", ref):
         raise JSONSchemaError('Invalid format for `$ref`: "{}"'.format(ref))
 
-    return _get_ref(schema,
-                    re.split('/', re.sub(r'^#/', '', ref)))
+    return _get_ref(schema, re.split("/", re.sub(r"^#/", "", ref)))
 
 
 def _is_ref(schema):
@@ -143,7 +143,7 @@ def _is_ref(schema):
     :return: Boolean
     """
 
-    return '$ref' in schema
+    return "$ref" in schema
 
 
 def _is_allof(schema):
@@ -154,7 +154,7 @@ def _is_allof(schema):
     :return: Boolean
     """
 
-    return not _is_ref(schema) and 'allOf' in schema
+    return not _is_ref(schema) and "allOf" in schema
 
 
 def is_anyof(schema):
@@ -165,7 +165,7 @@ def is_anyof(schema):
     :return: Boolean
     """
 
-    return not _is_ref(schema) and not _is_allof(schema) and 'anyOf' in schema
+    return not _is_ref(schema) and not _is_allof(schema) and "anyOf" in schema
 
 
 def is_object(schema):
@@ -175,10 +175,12 @@ def is_object(schema):
     :return: Boolean
     """
 
-    return not _is_ref(schema) and not is_anyof(schema) and not _is_allof(schema) \
-           and (OBJECT in get_type(schema)
-                or 'properties' in schema
-                or not schema)
+    return (
+        not _is_ref(schema)
+        and not is_anyof(schema)
+        and not _is_allof(schema)
+        and (OBJECT in get_type(schema) or "properties" in schema or not schema)
+    )
 
 
 def is_iterable(schema):
@@ -188,9 +190,7 @@ def is_iterable(schema):
     :return: Boolean
     """
 
-    return not _is_ref(schema) \
-           and ARRAY in get_type(schema) \
-           and 'items' in schema
+    return not _is_ref(schema) and ARRAY in get_type(schema) and "items" in schema
 
 
 def is_nullable(schema):
@@ -221,7 +221,7 @@ def is_datetime(schema):
     :return: Boolean
     """
 
-    return STRING in get_type(schema) and schema.get('format') == DATE_TIME_FORMAT
+    return STRING in get_type(schema) and schema.get("format") == DATE_TIME_FORMAT
 
 
 def is_date(schema):
@@ -231,7 +231,7 @@ def is_date(schema):
     :return: Boolean
     """
 
-    return STRING in get_type(schema) and schema.get('format') == DATE_FORMAT
+    return STRING in get_type(schema) and schema.get("format") == DATE_FORMAT
 
 
 def is_bq_geography(schema):
@@ -241,7 +241,7 @@ def is_bq_geography(schema):
     :return: Boolean
     """
 
-    return STRING in get_type(schema) and schema.get('format') == BQ_GEOGRAPHY
+    return STRING in get_type(schema) and schema.get("format") == BQ_GEOGRAPHY
 
 
 def is_bq_decimal(schema):
@@ -251,7 +251,7 @@ def is_bq_decimal(schema):
     :return: Boolean
     """
 
-    return STRING in get_type(schema) and schema.get('format') == BQ_DECIMAL
+    return STRING in get_type(schema) and schema.get("format") == BQ_DECIMAL
 
 
 def is_bq_bigdecimal(schema):
@@ -261,7 +261,7 @@ def is_bq_bigdecimal(schema):
     :return: Boolean
     """
 
-    return STRING in get_type(schema) and schema.get('format') == BQ_BIGDECIMAL
+    return STRING in get_type(schema) and schema.get("format") == BQ_BIGDECIMAL
 
 
 def is_number(schema):
@@ -285,16 +285,16 @@ def make_nullable(schema):
         return schema
 
     ret_schema = deepcopy(schema)
-    ret_schema['type'] = t + [NULL]
+    ret_schema["type"] = t + [NULL]
     return ret_schema
 
 
 class Cachable(dict):
-    '''
+    """
     The simplified json_schemas we produce are idempotent. ie, if you simplify a simplified
     json_schema, it will return the same thing. We wrap the `dict` object with a few
     helpers which extend it so that we avoid recursion in some instances.
-    '''
+    """
 
     def __init__(self, raw_dict, simplified=True):
         self._c = None
@@ -323,12 +323,12 @@ class Cachable(dict):
 
 
 def _allof_sort_key(schema):
-    '''
+    """
     We prefer scalars over combinations.
     With scalars we prefer date-times over strings.
     With combinations, we prefer objects.
     With all, we prefer nullables.
-    '''
+    """
     if is_nullable(schema):
         sort_value = 0
     else:
@@ -354,9 +354,10 @@ def _simplify__allof__merge__objects(schemas):
     # Merge objects together preferring later allOfs over earlier
     next_schemas = schemas[1:]
     while next_schemas and is_object(next_schemas[0]):
-        ret_schema['properties'] = {
-            **ret_schema.get('properties', {}),
-            **next_schemas[0].get('properties', {})}
+        ret_schema["properties"] = {
+            **ret_schema.get("properties", {}),
+            **next_schemas[0].get("properties", {}),
+        }
 
         next_schemas = next_schemas[1:]
 
@@ -370,18 +371,18 @@ def _simplify__allof__merge__iterables(root_schema, schemas):
 
     next_schemas = schemas
     while next_schemas and is_iterable(next_schemas[0]):
-        item_schemas.append(next_schemas[0]['items'])
+        item_schemas.append(next_schemas[0]["items"])
 
         next_schemas = next_schemas[1:]
 
-    ret_schema['items'] = _helper_simplify(root_schema, {'allOf': item_schemas})
+    ret_schema["items"] = _helper_simplify(root_schema, {"allOf": item_schemas})
     return ret_schema
 
 
 def _simplify__allof(root_schema, child_schema):
     simplified_schemas = [
-        _helper_simplify(root_schema, schema)
-        for schema in child_schema['allOf']]
+        _helper_simplify(root_schema, schema) for schema in child_schema["allOf"]
+    ]
     schemas = sorted(simplified_schemas, key=_allof_sort_key)
 
     ret_schema = schemas[0]
@@ -396,50 +397,45 @@ def _simplify__allof(root_schema, child_schema):
 
 
 def _simplify__implicit_anyof(root_schema, schema):
-    '''
+    """
     Typically literals are simple and have at most two types, one of which being NULL.
     However, they _can_ have many types wrapped up inside them as an implicit `anyOf`.
 
     Since we support `anyOf`, it is simpler to unwrap and "flatten" this implicit
     combination type.
-    '''
+    """
     schemas = []
     types = set(get_type(schema))
 
     if types == {NULL}:
-        return Cachable({'type': [NULL]})
+        return Cachable({"type": [NULL]})
 
     types.discard(NULL)
 
     if is_datetime(schema):
-        schemas.append(Cachable({
-            'type': [STRING],
-            'format': DATE_TIME_FORMAT
-        }))
+        schemas.append(Cachable({"type": [STRING], "format": DATE_TIME_FORMAT}))
 
         types.remove(STRING)
 
     if is_date(schema):
-        schemas.append(Cachable({
-            'type': [STRING],
-            'format': DATE_FORMAT
-        }))
+        schemas.append(Cachable({"type": [STRING], "format": DATE_FORMAT}))
 
         types.remove(STRING)
 
     if is_bq_geography(schema):
-        schemas.append(Cachable({
-            'type': [STRING],
-            'format': BQ_GEOGRAPHY
-        }))
+        schemas.append(Cachable({"type": [STRING], "format": BQ_GEOGRAPHY}))
 
         types.remove(STRING)
 
     if is_bq_decimal(schema):
-        schemas.append(Cachable({
-            'type': [STRING],
-            'format': BQ_DECIMAL,
-        }))
+        schemas.append(
+            Cachable(
+                {
+                    "type": [STRING],
+                    "format": BQ_DECIMAL,
+                }
+            )
+        )
 
         types.remove(STRING)
 
@@ -448,58 +444,55 @@ def _simplify__implicit_anyof(root_schema, schema):
     # DECIMAL and BIGDECIMAL\
     if is_number(schema):
         if schema.get("multipleOf"):
-            schemas.append(Cachable({
-                'type': [STRING],
-                'format': NUMBER,
-                'multipleOf': schema["multipleOf"]
-            }))
+            schemas.append(
+                Cachable(
+                    {
+                        "type": [STRING],
+                        "format": NUMBER,
+                        "multipleOf": schema["multipleOf"],
+                    }
+                )
+            )
 
         else:
-            schemas.append(Cachable({
-                'type': [STRING],
-                'format': NUMBER
-            }))
+            schemas.append(Cachable({"type": [STRING], "format": NUMBER}))
 
         types.remove(NUMBER)
 
     if is_bq_bigdecimal(schema):
-        schemas.append(Cachable({
-            'type': [STRING],
-            'format': BQ_BIGDECIMAL
-        }))
+        schemas.append(Cachable({"type": [STRING], "format": BQ_BIGDECIMAL}))
 
         types.remove(STRING)
 
     if is_object(schema):
         properties = {}
-        for field, field_json_schema in schema.get('properties', {}).items():
+        for field, field_json_schema in schema.get("properties", {}).items():
             properties[field] = _helper_simplify(root_schema, field_json_schema)
 
-        schemas.append({
-            'type': [OBJECT],
-            'properties': properties
-        })
+        schemas.append({"type": [OBJECT], "properties": properties})
 
         types.discard(OBJECT)
 
     if is_iterable(schema):
-        schemas.append({
-            'type': [ARRAY],
-            'items': _helper_simplify(root_schema, schema.get('items', {}))
-        })
+        schemas.append(
+            {
+                "type": [ARRAY],
+                "items": _helper_simplify(root_schema, schema.get("items", {})),
+            }
+        )
 
         types.remove(ARRAY)
 
-    schemas += [{'type': [t]} for t in types]
+    schemas += [{"type": [t]} for t in types]
 
     if is_nullable(schema):
         schemas = [make_nullable(s) for s in schemas]
 
-    return _helper_simplify(root_schema, {'anyOf': [Cachable(s) for s in schemas]})
+    return _helper_simplify(root_schema, {"anyOf": [Cachable(s) for s in schemas]})
 
 
 def _simplify__anyof(root_schema, schema):
-    '''
+    """
     `anyOf` clauses are merged/simplified according to the following rules (these _are_ recursive):
 
     - all literals are dedupped
@@ -508,11 +501,9 @@ def _simplify__anyof(root_schema, schema):
     - all `anyOf`s are flattened to the topmost
     - if there is only a single element in an `anyOf`, that is denested
     - if any `anyOf`s are nullable, all are nullable
-    '''
+    """
 
-    schemas = [
-        _helper_simplify(root_schema, schema)
-        for schema in schema['anyOf']]
+    schemas = [_helper_simplify(root_schema, schema) for schema in schema["anyOf"]]
 
     literals = set()
     any_nullable = False
@@ -530,11 +521,11 @@ def _simplify__anyof(root_schema, schema):
 
         elif is_anyof(sub_schema):
             # Flatten potentially deeply nested `anyOf`s
-            schemas += sub_schema['anyOf']
+            schemas += sub_schema["anyOf"]
 
         elif is_object(sub_schema):
             any_merged_objects = True
-            for k, s in sub_schema.get('properties', {}).items():
+            for k, s in sub_schema.get("properties", {}).items():
                 if k in merged_object_properties:
                     merged_object_properties[k].append(s)
                 else:
@@ -542,7 +533,7 @@ def _simplify__anyof(root_schema, schema):
 
         elif is_iterable(sub_schema):
             any_merged_iters = True
-            merged_item_schemas.append(sub_schema['items'])
+            merged_item_schemas.append(sub_schema["items"])
 
     merged_schemas = set()
     for l in literals:
@@ -554,12 +545,9 @@ def _simplify__anyof(root_schema, schema):
 
     if any_merged_objects:
         for k, v in merged_object_properties.items():
-            merged_object_properties[k] = _helper_simplify(root_schema, {'anyOf': v})
+            merged_object_properties[k] = _helper_simplify(root_schema, {"anyOf": v})
 
-        s = {
-            'type': [OBJECT],
-            'properties': merged_object_properties
-        }
+        s = {"type": [OBJECT], "properties": merged_object_properties}
 
         if any_nullable:
             s = make_nullable(s)
@@ -567,12 +555,11 @@ def _simplify__anyof(root_schema, schema):
         merged_schemas.add(Cachable(s))
 
     if any_merged_iters:
-        merged_item_schemas = _helper_simplify(root_schema, {'anyOf': merged_item_schemas})
+        merged_item_schemas = _helper_simplify(
+            root_schema, {"anyOf": merged_item_schemas}
+        )
 
-        s = {
-            'type': [ARRAY],
-            'items': merged_item_schemas
-        }
+        s = {"type": [ARRAY], "items": merged_item_schemas}
 
         if any_nullable:
             s = make_nullable(s)
@@ -582,7 +569,7 @@ def _simplify__anyof(root_schema, schema):
     if len(merged_schemas) == 1:
         return merged_schemas.pop()
 
-    return Cachable({'anyOf': sorted(merged_schemas)})
+    return Cachable({"anyOf": sorted(merged_schemas)})
 
 
 def _helper_simplify(root_schema, child_schema):
@@ -593,10 +580,16 @@ def _helper_simplify(root_schema, child_schema):
     ## Refs override all other type definitions
     if _is_ref(child_schema):
         try:
-            ret_schema = _helper_simplify(root_schema, get_ref(root_schema, child_schema['$ref']))
+            ret_schema = _helper_simplify(
+                root_schema, get_ref(root_schema, child_schema["$ref"])
+            )
 
         except RecursionError:
-            raise JSONSchemaError('`$ref` path "{}" is recursive'.format(get_ref(root_schema, child_schema['$ref'])))
+            raise JSONSchemaError(
+                '`$ref` path "{}" is recursive'.format(
+                    get_ref(root_schema, child_schema["$ref"])
+                )
+            )
 
     elif _is_allof(child_schema):
         ret_schema = _simplify__allof(root_schema, child_schema)
@@ -607,8 +600,8 @@ def _helper_simplify(root_schema, child_schema):
     else:
         ret_schema = _simplify__implicit_anyof(root_schema, child_schema)
 
-    if 'default' in child_schema:
-        ret_schema['default'] = child_schema.get('default')
+    if "default" in child_schema:
+        ret_schema["default"] = child_schema.get("default")
 
     return Cachable(ret_schema)
 
@@ -632,8 +625,10 @@ def simplify(schema):
 
 
 def _valid_schema_version(schema):
-    return '$schema' not in schema \
-           or schema['$schema'] == 'http://json-schema.org/draft-04/schema#'
+    return (
+        "$schema" not in schema
+        or schema["$schema"] == "http://json-schema.org/draft-04/schema#"
+    )
 
 
 def _unexpected_validation_error(errors, exception):
@@ -645,7 +640,7 @@ def _unexpected_validation_error(errors, exception):
     """
 
     if not errors:
-        return ['Unexpected exception encountered: {}'.format(str(exception))]
+        return ["Unexpected exception encountered: {}".format(str(exception))]
 
     return errors
 
@@ -661,11 +656,13 @@ def validation_errors(schema):
     errors = []
 
     if not isinstance(schema, dict):
-        errors.append('Parameter `schema` is not a dict, instead found: {}'.format(type(schema)))
+        errors.append(
+            "Parameter `schema` is not a dict, instead found: {}".format(type(schema))
+        )
 
     try:
         if not _valid_schema_version(schema):
-            errors.append('Schema version must be Draft 4. Found: {}'.format('$schema'))
+            errors.append("Schema version must be Draft 4. Found: {}".format("$schema"))
     except Exception as ex:
         errors = _unexpected_validation_error(errors, ex)
 
@@ -687,27 +684,28 @@ def validation_errors(schema):
 
 
 _shorthand_mapping = {
-    NULL: '',
-    'string': 's',
-    'number': 'f',
-    'integer': 'i',
-    'boolean': 'b',
-    'date-time': 't'
+    NULL: "",
+    "string": "s",
+    "number": "f",
+    "integer": "i",
+    "boolean": "b",
+    "date-time": "t",
 }
 
 
 def _type_shorthand(type_s):
     if isinstance(type_s, list):
-        shorthand = ''
+        shorthand = ""
         for t in sorted(type_s):
             shorthand += _type_shorthand(t)
         return shorthand
 
     if not type_s in _shorthand_mapping:
-        raise JSONSchemaError('Shorthand not available for type {}. Expected one of {}'.format(
-            type_s,
-            list(_shorthand_mapping.keys())
-        ))
+        raise JSONSchemaError(
+            "Shorthand not available for type {}. Expected one of {}".format(
+                type_s, list(_shorthand_mapping.keys())
+            )
+        )
 
     return _shorthand_mapping[type_s]
 
@@ -715,8 +713,8 @@ def _type_shorthand(type_s):
 def shorthand(schema):
     t = deepcopy(get_type(schema))
 
-    if 'format' in schema and 'date-time' == schema['format'] and STRING in t:
+    if "format" in schema and "date-time" == schema["format"] and STRING in t:
         t.remove(STRING)
-        t.append('date-time')
+        t.append("date-time")
 
     return _type_shorthand(t)

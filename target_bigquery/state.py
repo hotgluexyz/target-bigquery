@@ -23,10 +23,11 @@ class State(dict):
             t = self
             if isinstance(m, Add) or isinstance(m, Change):
                 for i, p in enumerate(m.path):
-                    if i == len(m.path)-1:
+                    if i == len(m.path) - 1:
                         t[p] = m.newval
                     else:
-                        if p not in t: t[p] = {}
+                        if p not in t:
+                            t[p] = {}
                         t = t[p]
 
             elif isinstance(m, Remove):
@@ -39,4 +40,3 @@ class LiteralState(State):
         if state:
             self.clear()
             self.update(state)
-

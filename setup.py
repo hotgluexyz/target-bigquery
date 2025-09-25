@@ -17,5 +17,5 @@ setup(
     entry_points="""
         [console_scripts]
         target-bigquery=target_bigquery:main
-      """
+      """,
 )

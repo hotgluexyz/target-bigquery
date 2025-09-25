@@ -15,11 +15,18 @@ from google.cloud.exceptions import NotFound
 from jsonschema.validators import validator_for
 
 from target_bigquery.encoders import DecimalEncoder
-from target_bigquery.schema import build_schema, cleanup_record, create_valid_bigquery_name, format_record_to_schema
+from target_bigquery.schema import (
+    build_schema,
+    cleanup_record,
+    create_valid_bigquery_name,
+    format_record_to_schema,
+)
 
 from target_bigquery.simplify_json_schema import simplify
-from target_bigquery.validate_json_schema import validate_json_schema_completeness, \
-    check_schema_for_dupes_in_field_names
+from target_bigquery.validate_json_schema import (
+    validate_json_schema_completeness,
+    check_schema_for_dupes_in_field_names,
+)
 
 
 class BaseProcessHandler(object):
@@ -40,7 +47,9 @@ class BaseProcessHandler(object):
         self.validate_records = kwargs.get("validate_records", True)
         self.table_configs = kwargs.get("table_configs", {}) or {}
         self.INIT_STATE = kwargs.get("initial_state") or {}
-        self.force_alphanumeric_table_names = kwargs.get("force_alphanumeric_table_names", False)
+        self.force_alphanumeric_table_names = kwargs.get(
+            "force_alphanumeric_table_names", False
+        )
         # PartialLoadJobProcessHandler kwargs
         self.max_cache = kwargs.get("max_cache", 1024 * 1024 * 50)
 
@@ -83,28 +92,34 @@ class BaseProcessHandler(object):
             return iter([])
 
         self.tables[msg.stream] = "{}{}{}".format(
-                self.table_prefix, msg.stream, self.table_suffix
-            )
+            self.table_prefix, msg.stream, self.table_suffix
+        )
 
-        self.tables[msg.stream] = create_valid_bigquery_name(
-            self.tables[msg.stream]
-        ) if self.force_alphanumeric_table_names else self.tables[msg.stream]
+        self.tables[msg.stream] = (
+            create_valid_bigquery_name(self.tables[msg.stream])
+            if self.force_alphanumeric_table_names
+            else self.tables[msg.stream]
+        )
 
         self.schemas[msg.stream] = msg.schema
         validator_cls = validator_for(msg.schema)
-        validator_cls.check_schema(msg.schema) # raises SchemaError if invalid
+        validator_cls.check_schema(msg.schema)  # raises SchemaError if invalid
         self.validators[msg.stream] = validator_cls(msg.schema)
         self.key_properties[msg.stream] = msg.key_properties
 
         validate_json_schema_completeness(self.schemas[msg.stream])
 
-        check_schema_for_dupes_in_field_names(stream_name=msg.stream, schema=self.schemas[msg.stream])
+        check_schema_for_dupes_in_field_names(
+            stream_name=msg.stream, schema=self.schemas[msg.stream]
+        )
 
         schema_simplified = simplify(self.schemas[msg.stream])
-        schema = build_schema(schema=schema_simplified,
-                              key_properties=msg.key_properties,
-                              add_metadata=self.add_metadata_columns,
-                              force_fields=self.table_configs.get(msg.stream, {}).get("force_fields", {}))
+        schema = build_schema(
+            schema=schema_simplified,
+            key_properties=msg.key_properties,
+            add_metadata=self.add_metadata_columns,
+            force_fields=self.table_configs.get(msg.stream, {}).get("force_fields", {}),
+        )
         self.bq_schema_dicts[msg.stream] = self._build_bq_schema_dict(schema)
         self.bq_schemas[msg.stream] = schema
 
@@ -115,7 +130,9 @@ class BaseProcessHandler(object):
     def on_stream_end(self):
         yield from ()
 
-    def _build_bq_schema_dict(self, schema):  # could move this to derived class but seems right to handle in base
+    def _build_bq_schema_dict(
+        self, schema
+    ):  # could move this to derived class but seems right to handle in base
         """
         Convert BigQuery schema as a list to BigQuery schema as a dictionary
 
@@ -129,7 +146,9 @@ class BaseProcessHandler(object):
             f = field if isinstance(field, dict) else field.to_api_repr()
             schema_dict[f["name"]] = f
             if f.get("fields"):
-                schema_dict[f["name"]]["fields"] = self._build_bq_schema_dict(f["fields"])
+                schema_dict[f["name"]]["fields"] = self._build_bq_schema_dict(
+                    f["fields"]
+                )
             schema_dict[f["name"]].pop("description")
             schema_dict[f["name"]].pop("name")
         return schema_dict
@@ -155,8 +174,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         self.rows = {}
 
         self.client = bigquery.Client(
-            project=self.project_id,
-            location=kwargs.get("location", "US")
+            project=self.project_id, location=kwargs.get("location", "US")
         )
         self.truncate_counts = {}
 
@@ -188,17 +206,23 @@ class LoadJobProcessHandler(BaseProcessHandler):
         stream = msg.stream
 
         if stream not in self.schemas:
-            raise Exception(f"A record for stream {msg.stream} was encountered before a corresponding schema")
+            raise Exception(
+                f"A record for stream {msg.stream} was encountered before a corresponding schema"
+            )
 
         schema = self.schemas[stream]
         bq_schema = self.bq_schema_dicts[stream]
         nr = cleanup_record(schema, msg.record)
 
         try:
-            nr = format_record_to_schema(nr, self.bq_schema_dicts[stream]) # --> We might need this
+            nr = format_record_to_schema(
+                nr, self.bq_schema_dicts[stream]
+            )  # --> We might need this
         except Exception as e:
-            extra={"record" : msg.record, "schema": schema, "bq_schema": bq_schema}
-            self.logger.critical(f"Cannot format a record for stream {msg.stream} to its corresponding BigQuery schema. Details: {extra}")
+            extra = {"record": msg.record, "schema": schema, "bq_schema": bq_schema}
+            self.logger.critical(
+                f"Cannot format a record for stream {msg.stream} to its corresponding BigQuery schema. Details: {extra}"
+            )
             raise e
 
         # schema validation may fail if data doesn't match schema in terms of data types
@@ -207,13 +231,20 @@ class LoadJobProcessHandler(BaseProcessHandler):
         validator = self.validators[stream]
         if self.validate_records:
             try:
-                validator.validate(msg.record, schema) # --> This is pointless, we are not writing the raw msg.record
+                validator.validate(
+                    msg.record, schema
+                )  # --> This is pointless, we are not writing the raw msg.record
             except Exception as e:
-                validator.validate(nr, schema) # THIS IS DEFINITELY NOT NEEDED, why would it be validated again, it just created it above with `format_record_to_schema`, why would it not comply
+                validator.validate(
+                    nr, schema
+                )  # THIS IS DEFINITELY NOT NEEDED, why would it be validated again, it just created it above with `format_record_to_schema`, why would it not comply
 
         if self.add_metadata_columns:
-            nr["_time_extracted"] = msg.time_extracted.isoformat() \
-                if msg.time_extracted else datetime.utcnow().isoformat()
+            nr["_time_extracted"] = (
+                msg.time_extracted.isoformat()
+                if msg.time_extracted
+                else datetime.utcnow().isoformat()
+            )
             nr["_time_loaded"] = datetime.utcnow().isoformat()
 
         data = bytes(json.dumps(nr, cls=DecimalEncoder) + "\n", "UTF-8")
@@ -247,7 +278,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
         for column in self.bq_schemas[stream]:
             if column.name not in [n.name for n in new_schema]:
                 new_columns.append(column.name)
-                self.logger.info(f"Column {column.name} missing in table {self.tables[stream]}, creating it...")
+                self.logger.info(
+                    f"Column {column.name} missing in table {self.tables[stream]}, creating it..."
+                )
                 new_schema.append(column)
         if new_columns:
             table.schema = new_schema
@@ -257,14 +290,19 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 self.logger.info(f"Error creating column in {self.tables[stream]}")
 
     def primary_key_condition(self, stream):
-        key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
+        key_properties = [
+            create_valid_bigquery_name(k) for k in self.key_properties[stream]
+        ]
         self.logger.info(f"Primary keys: {', '.join(key_properties)}")
         keys = [f"t.{k}=s.{k}" for k in key_properties]
         if len(keys) < 1:
-            raise Exception(f"No primary keys specified from the tap and Incremental option selected")
+            raise Exception(
+                f"No primary keys specified from the tap and Incremental option selected"
+            )
         return " and ".join(keys)
-    #TODO: test it with multiple ids (an array of ids, if there are multiple key_properties in JSON schema)
-    #TODO: test it with dupe ids in the data
+
+    # TODO: test it with multiple ids (an array of ids, if there are multiple key_properties in JSON schema)
+    # TODO: test it with dupe ids in the data
 
     @backoff.on_exception(
         backoff.expo,
@@ -272,7 +310,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
             google_exceptions.BadRequest,
             google_exceptions.ServiceUnavailable,
         ),
-        max_tries=3
+        max_tries=3,
     )
     def _do_temp_table_based_load(self, rows):
         assert isinstance(rows, dict)
@@ -280,7 +318,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
         loaded_tmp_tables = []
         try:
             for stream in rows.keys():
-                tmp_table_name = "t_{}_{}".format(self.tables[stream], str(uuid.uuid4()).replace("-", ""))
+                tmp_table_name = "t_{}_{}".format(
+                    self.tables[stream], str(uuid.uuid4()).replace("-", "")
+                )
 
                 job = self._load_to_bq(
                     client=self.client,
@@ -291,7 +331,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
                     # key_props=self.key_properties[stream],
                     # metadata_columns=self.add_metadata_columns,
                     truncate=True,
-                    rows=self.rows[stream]
+                    rows=self.rows[stream],
                 )
 
                 loaded_tmp_tables.append((stream, tmp_table_name))
@@ -317,14 +357,25 @@ class LoadJobProcessHandler(BaseProcessHandler):
                 # table-configs dictate per table replication method (and override the top level truncate and incremental)
                 # This logic will need to happen in our new implementation
                 # if in our new implementation, the we encounter incremental, we should load the parquet file into a temp table and then do a merge
-                instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
-                instance_increment = self.incremental if not instance_truncate else False
+                instance_truncate = (
+                    self.truncate
+                    or self.table_configs.get(stream, {}).get("truncate", False)
+                    or self.table_configs.get(stream, {}).get("replication_method")
+                    == "truncate"
+                )
+                instance_increment = (
+                    self.incremental if not instance_truncate else False
+                )
 
-                key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
+                key_properties = [
+                    create_valid_bigquery_name(k) for k in self.key_properties[stream]
+                ]
 
                 if instance_increment and not key_properties:
                     # Fall back to truncate because there's no PK to upsert on
-                    self.logger.info(f"Falling back to truncate because {stream} has no key properties")
+                    self.logger.info(
+                        f"Falling back to truncate because {stream} has no key properties"
+                    )
                     instance_truncate = True
                     instance_increment = False
 
@@ -332,53 +383,72 @@ class LoadJobProcessHandler(BaseProcessHandler):
                     self.logger.info(f"Truncating dataset: {stream}")
                 # For larger jobs we don't want to keep truncating the same table when copy temporary table to production
                 # using this change we will switch truncate logic off and make subsequent copies to incremental
-                if stream in self.truncate_counts and self.truncate_counts.get(stream, 0) > 0:
+                if (
+                    stream in self.truncate_counts
+                    and self.truncate_counts.get(stream, 0) > 0
+                ):
                     instance_truncate = False
                 if instance_increment:
-                    self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL")
-                    self.logger.warning(f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data.")
+                    self.logger.info(
+                        f"Copy {tmp_table_name} to {self.tables[stream]} by INCREMENTAL"
+                    )
+                    self.logger.warning(
+                        f"INCREMENTAL replication method (MERGE SQL statement) is not recommended. It might result in loss of production data, because historical records get updated during the sync operation. Instead, we recommend using the APPEND replication method, which will preserve historical data."
+                    )
                     table_id = f"{self.project_id}.{self.dataset.dataset_id}.{self.tables[stream]}"
                     try:
                         self.client.get_table(table_id)
                         column_names = [x.name for x in self.bq_schemas[stream]]
 
-                        query ="""MERGE `{table}` t
+                        query = """MERGE `{table}` t
                             USING `{temp_table}` s
                             ON {primary_key_condition}
                             WHEN MATCHED THEN
                                 UPDATE SET {set_values}
                             WHEN NOT MATCHED THEN
                                 INSERT ({new_cols}) VALUES ({cols})
-                            """.format(table=table_id,
-                                       temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
-                                       primary_key_condition=self.primary_key_condition(stream),
-                                       set_values=', '.join(f'`{c}`=s.`{c}`' for c in column_names),
-                                       new_cols=', '.join(f'`{c}`' for c in column_names),
-                                       cols=', '.join(f's.`{c}`' for c in column_names))
+                            """.format(
+                            table=table_id,
+                            temp_table=f"{self.project_id}.{self.dataset.dataset_id}.{tmp_table_name}",
+                            primary_key_condition=self.primary_key_condition(stream),
+                            set_values=", ".join(
+                                f"`{c}`=s.`{c}`" for c in column_names
+                            ),
+                            new_cols=", ".join(f"`{c}`" for c in column_names),
+                            cols=", ".join(f"s.`{c}`" for c in column_names),
+                        )
 
                         job_config = QueryJobConfig()
                         query_job = self.client.query(query, job_config=job_config)
                         query_job.result()
-                        self.logger.info(f'LOADED {query_job.num_dml_affected_rows} rows')
+                        self.logger.info(
+                            f"LOADED {query_job.num_dml_affected_rows} rows"
+                        )
                         incremental_success = True
 
                     except NotFound:
-                        self.logger.info(f"Table {table_id} is not found, proceeding to upload with TRUNCATE")
+                        self.logger.info(
+                            f"Table {table_id} is not found, proceeding to upload with TRUNCATE"
+                        )
                         instance_truncate = True
 
                 if not incremental_success:
                     copy_config = CopyJobConfig()
                     if instance_truncate:
                         copy_config.write_disposition = WriteDisposition.WRITE_TRUNCATE
-                        self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by FULL_TABLE")
+                        self.logger.info(
+                            f"Copy {tmp_table_name} to {self.tables[stream]} by FULL_TABLE"
+                        )
                     else:
                         copy_config.write_disposition = WriteDisposition.WRITE_APPEND
-                        self.logger.info(f"Copy {tmp_table_name} to {self.tables[stream]} by APPEND")
+                        self.logger.info(
+                            f"Copy {tmp_table_name} to {self.tables[stream]} by APPEND"
+                        )
 
                     self.client.copy_table(
                         sources=self.dataset.table(tmp_table_name),
                         destination=self.dataset.table(self.tables[stream]),
-                        job_config=copy_config
+                        job_config=copy_config,
                     ).result()
                     if stream not in self.truncate_counts:
                         self.truncate_counts[stream] = 1
@@ -393,18 +463,22 @@ class LoadJobProcessHandler(BaseProcessHandler):
 
         finally:  # delete temp tables
             for stream, tmp_table_name in loaded_tmp_tables:
-                self.client.delete_table(table=self.dataset.table(tmp_table_name), not_found_ok=True)
+                self.client.delete_table(
+                    table=self.dataset.table(tmp_table_name), not_found_ok=True
+                )
 
-    def _load_to_bq(self,
-                    client,
-                    dataset,
-                    table_name,
-                    table_schema,
-                    table_config,
-                    # key_props,
-                    # metadata_columns,
-                    truncate,
-                    rows):
+    def _load_to_bq(
+        self,
+        client,
+        dataset,
+        table_name,
+        table_schema,
+        table_config,
+        # key_props,
+        # metadata_columns,
+        truncate,
+        rows,
+    ):
         """
         Load data to BigQuery
 
@@ -434,8 +508,7 @@ class LoadJobProcessHandler(BaseProcessHandler):
         # partitioning
         if partition_field:
             load_config.time_partitioning = bigquery.table.TimePartitioning(
-                type_=bigquery.table.TimePartitioningType.DAY,
-                field=partition_field
+                type_=bigquery.table.TimePartitioningType.DAY, field=partition_field
             )
 
         # clustering
@@ -473,7 +546,11 @@ class LoadJobProcessHandler(BaseProcessHandler):
             if load_job and load_job.errors:
                 reason = err.errors[0]["reason"]
                 messages = [f"{err['message']}" for err in load_job.errors]
-                logger.error("reason: {reason}, errors:\n{e}".format(reason=reason, e="\n".join(messages)))
+                logger.error(
+                    "reason: {reason}, errors:\n{e}".format(
+                        reason=reason, e="\n".join(messages)
+                    )
+                )
                 err.message = f"reason: {reason}, errors: {';'.join(messages)}"
 
             raise err
@@ -492,7 +569,9 @@ class PartialLoadJobProcessHandler(LoadJobProcessHandler):
             yield s
 
         if sum([self.rows[s].tell() for s in self.rows.keys()]) > self.max_cache:
-            rows = {s: self.rows[s] for s in self.rows.keys() if self.rows[s].tell() > 0}
+            rows = {
+                s: self.rows[s] for s in self.rows.keys() if self.rows[s].tell() > 0
+            }
             self._do_temp_table_based_load(rows)
 
             yield self.STATE
