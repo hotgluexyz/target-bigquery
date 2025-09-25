@@ -3,9 +3,7 @@ import os
 import sys
 
 import singer
-from google.api_core import exceptions
-from google.cloud import bigquery
-from google.cloud.bigquery import Dataset
+
 
 logger = singer.get_logger()
 
