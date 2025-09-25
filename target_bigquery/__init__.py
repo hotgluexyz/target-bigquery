@@ -94,6 +94,7 @@ def main():
         processor = SingerProcessor(config, tables_config)
         for line in tap_stream:
             processor.process(line)
+        processor.on_complete()
 
         # load_to_bigquery() -->
         # 1. For each parquet file (AKA stream), we:

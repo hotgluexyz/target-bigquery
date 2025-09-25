@@ -1,10 +1,16 @@
 import json
 import singer
 
+from datetime import datetime
 from google.cloud.bigquery import SchemaField
 from jsonschema.validators import validator_for
 from target_bigquery.config import TargetConfig, TablesConfig, TableConfig
-from target_bigquery.schema import build_schema, create_valid_bigquery_name
+from target_bigquery.schema import (
+    build_schema,
+    create_valid_bigquery_name,
+    cleanup_record,
+    format_record_to_schema,
+)
 from target_bigquery.simplify_json_schema import simplify
 from target_bigquery.validate_json_schema import (
     validate_json_schema_completeness,
@@ -72,19 +78,20 @@ class SingerProcessor:
         )
 
         self.json_schemas[stream_name] = message.schema
-        self.key_properties[stream_name] = message.key_properties
-
-        # Validation of schema
-        # I think we can add a check to see if we should validate here?
-        validator_cls = validator_for(message.schema)
-        validator_cls.check_schema(message.schema)
-        self.validators[stream_name] = validator_cls(message.schema)
         validate_json_schema_completeness(self.json_schemas[stream_name])
         check_schema_for_dupes_in_field_names(
             stream_name=stream_name, schema=self.json_schemas[stream_name]
         )
 
-        # BigQuery schema generation
+        self.key_properties[stream_name] = message.key_properties
+
+        # Get schema validator for stream
+        if self.target_config.validate_records:
+            validator_cls = validator_for(message.schema)
+            validator_cls.check_schema(message.schema)
+            self.validators[stream_name] = validator_cls(message.schema)
+
+        # Generate BigQuery schema for stream
         schema_simplified = simplify(self.json_schemas[stream_name])
         schema = build_schema(
             schema=schema_simplified,
@@ -103,41 +110,66 @@ class SingerProcessor:
 
     def handle_record_message(self, message: singer.RecordMessage):
         stream_name = message.stream
-        # if stream not in self.schemas:
-        #    raise Exception(f"A record for stream {msg.stream} was encountered before a corresponding schema")
-        # schema = stream[stream_name].schema
-        # if we are configured to validate
-        #     stream[stream_name].validator.validate(msg.record, schema)
-        # nr = cleanup_record(schema, msg.record)
-        # nr = format_record_to_schema(nr, self.bq_schema_dicts[stream_name])
-        # if add_metadata_columns:
-        #     add metadata
-        #
+
+        if stream_name not in self.json_schemas:
+            raise Exception(
+                f"A record for stream {stream_name} was encountered before a corresponding schema"
+            )
+
+        schema = self.json_schemas[stream_name]
+        validator = self.validators[stream_name]
+
+        if self.target_config.validate_records:
+            validator.validate(message.record, schema)
+
+        bq_schema = self.big_query_schema_dicts[stream_name]
+        nr = cleanup_record(schema, message.record)
+        try:
+            nr = format_record_to_schema(nr, bq_schema)
+        except Exception as e:
+            extra = {"record": message.record, "schema": schema, "bq_schema": bq_schema}
+            logger.critical(
+                f"Cannot format a record for stream {stream_name} to its corresponding BigQuery schema. Details: {extra}"
+            )
+            raise e
+
+        if self.target_config.add_metadata_columns:
+            nr["_time_extracted"] = (
+                message.time_extracted.isoformat()
+                if message.time_extracted
+                else datetime.utcnow().isoformat()
+            )
+            nr["_time_loaded"] = datetime.utcnow().isoformat()
+
+        self.rows[stream_name].append(nr)
+
         # # This is new stuff for this implementation
         # pa_row = convert_to_pyarrow_row(nr)
         # rows[stream_name] = pa_row
         # if len(rows[stream_name]) > STREAM_ROW_CACHE_SIZE:
         #     flush to parquet file
-        pass
 
     def handle_state_message(self, message: singer.StateMessage):
         pass
 
     def process(self, line: str):
         try:
-            msg = singer.parse_message(line)
+            message = singer.parse_message(line)
         except json.decoder.JSONDecodeError:
             logger.error("Unable to parse:\n{}".format(line))
             raise
 
-        if isinstance(msg, singer.RecordMessage):
-            self.handle_record_message(msg)
+        if isinstance(message, singer.RecordMessage):
+            self.handle_record_message(message)
 
-        elif isinstance(msg, singer.SchemaMessage):
-            self.handle_schema_message(msg)
+        elif isinstance(message, singer.SchemaMessage):
+            self.handle_schema_message(message)
 
-        elif isinstance(msg, singer.StateMessage):
-            self.handle_state_message(msg)
+        elif isinstance(message, singer.StateMessage):
+            self.handle_state_message(message)
 
         else:
-            raise Exception("Unrecognized message {}".format(msg))
+            raise Exception("Unrecognized message {}".format(message))
+
+    def on_complete(self):
+        pass
