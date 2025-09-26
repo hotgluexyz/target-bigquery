@@ -51,25 +51,42 @@ class BigQueryLoader:
         self._load_parquet_files_to_bigquery()
 
     def _upload_parquet_files_to_google_cloud_storage(self):
-        """Upload all parquet files to Google Cloud Storage sequentially."""
+        """Upload all parquet files to Google Cloud Storage in parallel."""
         bucket = self.storage_client.bucket(self.bucket_name)
 
-        for stream_name, parquet_file in self.parquet_files.items():
+        def upload_file(stream_name: str, parquet_file: str) -> tuple[str, str]:
+            """Upload a single parquet file to GCS and return stream name and URI."""
             logger.info(
                 f"Uploading {stream_name} parquet data to Google Cloud Storage: {parquet_file}"
             )
 
             blob_name = f"{stream_name}.parquet"
-
             blob = bucket.blob(blob_name)
             blob.upload_from_filename(parquet_file)
 
-            self.uploaded_blob_uris[stream_name] = (
-                f"gs://{self.bucket_name}/{blob_name}"
-            )
-            logger.info(
-                f"Successfully uploaded {stream_name} to GCS: {self.uploaded_blob_uris[stream_name]}"
-            )
+            uri = f"gs://{self.bucket_name}/{blob_name}"
+            logger.info(f"Successfully uploaded {stream_name} to GCS: {uri}")
+            return stream_name, uri
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [
+                executor.submit(upload_file, stream_name, parquet_file)
+                for stream_name, parquet_file in self.parquet_files.items()
+            ]
+
+            failed_uploads = []
+            for future in futures:
+                try:
+                    stream_name, uri = future.result()
+                    self.uploaded_blob_uris[stream_name] = uri
+                except Exception as e:
+                    failed_uploads.append(str(e))
+                    logger.error(f"GCS upload failed: {e}")
+
+            if failed_uploads:
+                raise Exception(
+                    f"Failed to upload {len(failed_uploads)} files to GCS: {'; '.join(failed_uploads)}"
+                )
 
     def _create_bigquery_load_job(self, stream_name: str, source_uri: str):
         """Create and execute a BigQuery load job for a single stream.

@@ -259,7 +259,6 @@ class SingerProcessor:
         for stream_name, writer in self.parquet_writers.items():
             try:
                 writer.close()
-                logger.info(f"Closed parquet writer for stream {stream_name}")
             except Exception as e:
                 logger.error(f"Failed to close parquet writer for {stream_name}: {e}")
 
