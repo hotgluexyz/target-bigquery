@@ -14,13 +14,9 @@ from target_bigquery.utils import emit_state
 
 from google.api_core import exceptions
 from google.cloud import bigquery
-from google.cloud.bigquery import Dataset
 
 
 logger = singer.get_logger()
-
-
-STREAM_ROW_CACHE_SIZE = 10000
 
 
 def ensure_dataset(project_id, dataset_id, location):
@@ -34,11 +30,9 @@ def ensure_dataset(project_id, dataset_id, location):
     :param location, str: location for the dataset (US). Passed to bigquery.Client().
     :return: client (BigQuery Client Object) and Dataset (BigQuery dataset)
     """
-    from google.cloud.bigquery import DatasetReference
-
     client = bigquery.Client(project=project_id, location=location)
 
-    dataset_ref = DatasetReference(project_id, dataset_id)
+    dataset_ref = bigquery.DatasetReference(project_id, dataset_id)
     try:
         client.create_dataset(dataset_ref)
     except exceptions.GoogleAPICallError as e:
@@ -55,7 +49,7 @@ def ensure_dataset(project_id, dataset_id, location):
             )
             return 2  # sys.exit(2)
 
-    return client, Dataset(dataset_ref)
+    return client, bigquery.Dataset(dataset_ref)
 
 
 def main():
