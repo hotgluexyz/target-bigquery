@@ -33,13 +33,17 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
                 if value.lower() == "null":
                     return None
                 try:
-                    # Use dateutil parser which is much more flexible than fromisoformat
-                    return dateutil_parser.parse(value)
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Cannot convert string '{value}' to timestamp: {e}, setting to None"
-                    )
-                    return None
+                    # Try fast ISO format parsing first (handles most cases)
+                    return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                except ValueError:
+                    # Fallback to slower but more flexible dateutil parser
+                    try:
+                        return dateutil_parser.parse(value)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Cannot convert string '{value}' to timestamp with any parser: {e}, setting to None"
+                        )
+                        return None
             elif isinstance(value, datetime):
                 return value
 
