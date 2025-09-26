@@ -142,6 +142,15 @@ class SingerProcessor:
         # Total row counter across all streams
         self.total_cached_rows = 0
 
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures parquet writers are closed."""
+        self._close_parquet_writers()
+        return False  # Don't suppress exceptions
+
     def _get_parquet_writer(self, stream_name: str) -> pq.ParquetWriter:
         """
         Get or create a ParquetWriter for the given stream.

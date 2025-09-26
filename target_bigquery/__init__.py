@@ -137,8 +137,8 @@ def main():
     ensure_dataset(config.project_id, config.dataset_id, config.location)
 
     try:
-        processor = SingerProcessor(config, tables_config)
-        parquet_files = processor.process(tap_stream)
+        with SingerProcessor(config, tables_config) as processor:
+            parquet_files = processor.process(tap_stream)
 
         BigQueryLoader(
             config.project_id,
