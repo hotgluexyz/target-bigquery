@@ -56,6 +56,7 @@ class TargetConfig(BaseModel):
     force_alphanumeric_table_names: bool = False
     merge_state_messages: bool = True
     table_config: Optional[str] = None
+    google_storage_bucket: Optional[str] = "target-bigquery-testing"
 
     @model_validator(mode="after")
     def determine_replication_method(self):

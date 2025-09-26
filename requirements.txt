@@ -1,5 +1,6 @@
 singer-python~=5.12.1
 google-cloud-bigquery>=3,<4
+google-cloud-storage>=3,<4
 jsonschema~=2.6.0
 setuptools~=60.3.1
 backoff==1.8.0

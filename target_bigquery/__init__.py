@@ -3,6 +3,7 @@
 import argparse
 import io
 import json
+import os
 import singer
 import sys
 import traceback
@@ -10,44 +11,99 @@ import traceback
 from target_bigquery.config import TargetConfig, TablesConfig
 from target_bigquery.process import SingerProcessor
 from target_bigquery.state import State, LiteralState
-from target_bigquery.utils import emit_state
+from target_bigquery.biquery_loader import BigQueryLoader
 
 from google.api_core import exceptions
 from google.cloud import bigquery
 
-
 logger = singer.get_logger()
+
+
+def load_json_file(file_path: str, file_description: str = "file") -> dict:
+    """
+    Load and parse a JSON file with comprehensive error handling.
+
+    Args:
+        file_path: Path to the JSON file to load
+        file_description: Description of the file type for error messages
+
+    Returns:
+        Parsed JSON data as dictionary
+
+    Raises:
+        SystemExit: On any file loading or parsing error
+    """
+    try:
+        with open(file_path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.critical(f"{file_description.capitalize()} file not found: {file_path}")
+        sys.exit(2)
+    except json.JSONDecodeError as e:
+        logger.critical(f"Invalid JSON in {file_description} file {file_path}: {e}")
+        sys.exit(2)
+    except Exception as e:
+        logger.critical(f"Error reading {file_description} file {file_path}: {e}")
+        sys.exit(2)
+
+
+def emit_state(state):
+    """
+    Emit Singer state to stdout and optionally to a state file.
+
+    Writes the state as JSON to stdout (for Singer protocol compliance)
+    and also to a file if TARGET_BIGQUERY_STATE_FILE environment variable is set.
+
+    Args:
+        state: State object containing bookmarks and other state information
+    """
+    if state is not None:
+        line = json.dumps(state)
+        logger.debug(f"Emitting state: {line}")
+        sys.stdout.write("{}\n".format(line))
+        sys.stdout.flush()
+
+        if os.environ.get("TARGET_BIGQUERY_STATE_FILE", None):
+            fn = os.environ.get("TARGET_BIGQUERY_STATE_FILE", None)
+            with open(fn, "a") as f:
+                f.write("{}\n".format(line))
 
 
 def ensure_dataset(project_id, dataset_id, location):
     """
-    Given a project id, dataset id and location, creates BigQuery dataset
+    Ensure BigQuery dataset exists, creating it if necessary.
 
-    https://googleapis.dev/python/bigquery/latest/generated/google.cloud.bigquery.client.Client.html
+    Attempts to create the dataset and handles common error cases:
+    - 403 Forbidden: Log warning and continue (insufficient permissions)
+    - 409 Conflict: Continue silently (dataset already exists)
+    - Other errors: Log critical error and exit
 
-    :param project_id, str: GCP project id from target config file. Passed to bigquery.Client().
-    :param dataset_id, str: BigQuery dataset id from target config file.
-    :param location, str: location for the dataset (US). Passed to bigquery.Client().
-    :return: client (BigQuery Client Object) and Dataset (BigQuery dataset)
+    Args:
+        project_id: Google Cloud project ID
+        dataset_id: BigQuery dataset ID to create/verify
+        location: Geographic location for the dataset (e.g., 'US')
+
+    Returns:
+        Tuple of (BigQuery client, Dataset reference)
     """
     client = bigquery.Client(project=project_id, location=location)
 
     dataset_ref = bigquery.DatasetReference(project_id, dataset_id)
     try:
         client.create_dataset(dataset_ref)
+        logger.info(f"Successfully created BigQuery dataset: {dataset_id}")
     except exceptions.GoogleAPICallError as e:
         if e.response.status_code == 403:
             logger.info(
-                f"Skipping dataset validation due to insufficient permissions. Using dataset: {dataset_id}"
+                f"Skipping dataset validation due to insufficient permissions - using dataset: {dataset_id}"
             )
-            pass
         elif e.response.status_code == 409:  # dataset exists
-            pass
+            logger.info(f"BigQuery dataset {dataset_id} already exists - continuing")
         else:
             logger.critical(
-                f"Unable to create dataset {dataset_id} in project {project_id}. Exception: {e}"
+                f"Failed to create BigQuery dataset {dataset_id} in project {project_id}: {e}"
             )
-            return 2  # sys.exit(2)
+            raise
 
     return client, bigquery.Dataset(dataset_ref)
 
@@ -60,8 +116,7 @@ def main():
     flags = parser.parse_args()
 
     # Process target config file
-    with open(flags.config) as f:
-        config_dict = json.load(f)
+    config_dict = load_json_file(flags.config, "config")
     config = TargetConfig(**config_dict)
     state_handler = State if config.merge_state_messages else LiteralState
 
@@ -69,36 +124,29 @@ def main():
     table_config_path = flags.tables or config.table_config
     tables_config = TablesConfig()
     if table_config_path:
-        with open(table_config_path) as f:
-            tables_config_dict = json.load(f)
+        tables_config_dict = load_json_file(table_config_path, "tables config")
         tables_config = TablesConfig(**tables_config_dict)
 
     # Load initial state
     state = None
     if flags.state is not None:
-        with open(flags.state) as f:
-            state = json.load(f)
+        state = load_json_file(flags.state, "state")
 
     tap_stream = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
-    client, dataset = ensure_dataset(
-        config.project_id, config.dataset_id, config.location
-    )
+
+    ensure_dataset(config.project_id, config.dataset_id, config.location)
 
     try:
         processor = SingerProcessor(config, tables_config)
-        for line in tap_stream:
-            processor.process(line)
-        processor.on_complete()
+        parquet_files = processor.process(tap_stream)
 
-        # load_to_bigquery() -->
-        # 1. For each parquet file (AKA stream), we:
-        #     - compare the bq_query_schema[stream_name] with the schema of the remote bigquery target table,
-        #       add missing columns using the existing `create_missing_columns` method OR create the table if it doesn't exist.
-        # 2. We load all the files into google cloud storage in parallel (perhaps with a limit of some number of files at a time))
-        # 3. We use `bq load` to load the parquet files into bigquery from google cloud sorage
-        #     - Use the partition fields, cluster fields, and replication method from the target-tables-config.json to determine the job load config
-        #     - If append or truncate, we issue a simple load job to load the parquet files into big query
-        #         - Else if incremental, we load the parquet files into a temp table and then do a merge, ensuring that we clean up the temp table after the merge.
+        BigQueryLoader(
+            config.project_id,
+            config.dataset_id,
+            config.google_storage_bucket,
+            config.location,
+            parquet_files,
+        ).load()
 
         emit_state(state)
 

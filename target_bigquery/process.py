@@ -1,4 +1,7 @@
+import copy
 import json
+import os
+import io
 import singer
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -89,8 +92,7 @@ def build_bq_schema_dict(schema):
     schema_dict = {}
     for field in schema:
         f = field if isinstance(field, dict) else field.to_api_repr()
-        # Make a copy to avoid mutating the original field
-        import copy
+
         f = copy.deepcopy(f)
         schema_dict[f["name"]] = f
         if f.get("fields"):
@@ -101,7 +103,25 @@ def build_bq_schema_dict(schema):
 
 
 class SingerProcessor:
+    """
+    Processes Singer tap messages and converts them to Parquet files.
+
+    This class handles the complete pipeline from Singer JSON messages to
+    parquet files ready for BigQuery loading:
+    1. Schema message processing and BigQuery schema generation
+    2. Record message processing with validation and conversion
+    3. Batched writing to parquet files with PyArrow
+    4. Stream management and resource cleanup
+    """
+
     def __init__(self, target_config: TargetConfig, tables_config: TablesConfig):
+        """
+        Initialize the Singer message processor.
+
+        Args:
+            target_config: Target configuration settings
+            tables_config: Table-specific configuration settings
+        """
         self.target_config = target_config
         self.tables_config = tables_config
 
@@ -123,11 +143,24 @@ class SingerProcessor:
         self.total_cached_rows = 0
 
     def _get_parquet_writer(self, stream_name: str) -> pq.ParquetWriter:
-        """Get or create a ParquetWriter for the given stream"""
+        """
+        Get or create a ParquetWriter for the given stream.
+
+        Creates a new ParquetWriter with predefined schema and compression
+        if one doesn't exist for the stream. Stores the absolute file path
+        for later reference.
+
+        Args:
+            stream_name: Name of the data stream
+
+        Returns:
+            ParquetWriter instance for the stream
+        """
         if stream_name not in self.parquet_writers:
             # Create parquet file path
             parquet_file = f"{stream_name}.parquet"
-            self.parquet_files[stream_name] = parquet_file
+            parquet_file_path = os.path.abspath(parquet_file)
+            self.parquet_files[stream_name] = parquet_file_path
 
             # Create ParquetWriter with predefined schema
             self.parquet_writers[stream_name] = pq.ParquetWriter(
@@ -137,7 +170,14 @@ class SingerProcessor:
         return self.parquet_writers[stream_name]
 
     def _write_batch_to_parquet(self, stream_name: str):
-        """Write accumulated rows to parquet file and clear the buffer"""
+        """Write accumulated rows to parquet file and clear the buffer.
+
+        Converts the buffered rows to a PyArrow table and writes to the
+        stream's parquet file. Includes detailed error reporting if conversion fails.
+
+        Args:
+            stream_name: Name of the data stream to flush
+        """
         if not self.rows[stream_name]:
             return
 
@@ -176,42 +216,43 @@ class SingerProcessor:
             row_count = len(self.rows[stream_name])
             self.rows[stream_name] = []
 
-            logger.info(
-                f"Successfully wrote batch of {row_count} rows to {stream_name}.parquet"
-            )
+            logger.info(f"Wrote {row_count} rows to {stream_name}.parquet")
 
         except Exception as e:
-            logger.error(
-                f"Error writing batch to parquet for stream {stream_name}: {e}"
-            )
+            logger.error(f"Failed to write parquet batch for {stream_name}: {e}")
             raise
 
     def _flush_all_streams(self):
-        """Flush all streams that have data to their parquet files"""
+        """Flush all streams that have accumulated data to their parquet files.
+
+        Iterates through all streams and writes any buffered rows to disk.
+        Resets the total row counter after flushing.
+        """
         streams_flushed = []
         for stream_name in self.rows:
             if self.rows[stream_name]:  # Only flush streams with data
                 self._write_batch_to_parquet(stream_name)
                 streams_flushed.append(stream_name)
 
-        # Reset the total counter after flushing all streams
         self.total_cached_rows = 0
 
         if streams_flushed:
             logger.info(
-                f"Flushed {len(streams_flushed)} streams: {', '.join(streams_flushed)}"
+                f"Flushed {len(streams_flushed)} streams to parquet: {', '.join(streams_flushed)}"
             )
 
     def _close_parquet_writers(self):
-        """Close all parquet writers and finalize files"""
+        """Close all parquet writers and finalize files.
+
+        Ensures all parquet files are properly closed and metadata is written.
+        Should be called when all data processing is complete.
+        """
         for stream_name, writer in self.parquet_writers.items():
             try:
                 writer.close()
                 logger.info(f"Closed parquet writer for stream {stream_name}")
             except Exception as e:
-                logger.error(
-                    f"Error closing parquet writer for stream {stream_name}: {e}"
-                )
+                logger.error(f"Failed to close parquet writer for {stream_name}: {e}")
 
         self.parquet_writers.clear()
 
@@ -294,18 +335,26 @@ class SingerProcessor:
         self.rows[stream_name].append(converted_row)
         self.total_cached_rows += 1
 
-        # Flush all streams when total cached rows exceed threshold
         if self.total_cached_rows >= STREAM_ROW_CACHE_SIZE:
             self._flush_all_streams()
 
     def handle_state_message(self, message: singer.StateMessage):
         pass
 
-    def process(self, line: str):
+    def process_line(self, line: str):
+        """
+        Process a single line from the Singer tap stream.
+
+        Parses the JSON message and routes it to the appropriate handler
+        based on message type (SCHEMA, RECORD, or STATE).
+
+        Args:
+            line: Raw JSON line from Singer tap
+        """
         try:
             message = singer.parse_message(line)
         except json.decoder.JSONDecodeError:
-            logger.error("Unable to parse:\n{}".format(line))
+            logger.error(f"Failed to parse JSON message: {line.strip()}")
             raise
 
         if isinstance(message, singer.RecordMessage):
@@ -320,13 +369,40 @@ class SingerProcessor:
         else:
             raise Exception("Unrecognized message {}".format(message))
 
+    def process(self, tap_stream: io.TextIOWrapper):
+        """
+        Process the complete Singer tap stream.
+
+        Reads lines from the tap stream, processes each message,
+        and returns the generated parquet files when complete.
+
+        Args:
+            tap_stream: Text stream containing Singer messages
+
+        Returns:
+            Dictionary mapping stream names to parquet file paths
+        """
+        for line in tap_stream:
+            self.process_line(line)
+
+        return self.on_complete()
+
     def on_complete(self):
-        """Flush any remaining rows to parquet files and close writers"""
-        # Flush remaining rows for all streams
+        """
+        Complete processing and finalize all parquet files.
+
+        Flushes any remaining buffered rows to disk, closes all parquet writers,
+        and returns the mapping of stream names to their parquet file paths.
+
+        Returns:
+            Dictionary mapping stream names to absolute parquet file paths
+        """
+
         if self.total_cached_rows > 0:
             self._flush_all_streams()
 
-        # Close all parquet writers
         self._close_parquet_writers()
 
         logger.info("Completed processing and wrote all parquet files")
+
+        return self.parquet_files
