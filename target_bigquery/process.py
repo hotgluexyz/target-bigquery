@@ -2,13 +2,12 @@ import json
 import singer
 import pyarrow as pa
 import pyarrow.parquet as pq
-
+from typing import Any, Dict, List
 from datetime import datetime, UTC
 from dateutil import parser as dateutil_parser
-from google.cloud.bigquery import SchemaField
-from jsonschema.validators import validator_for
+
 from target_bigquery.config import TargetConfig, TablesConfig, TableConfig
-from target_bigquery.schema import (
+from target_bigquery.bigquery_schema import (
     build_schema,
     create_valid_bigquery_name,
     cleanup_record,
@@ -18,7 +17,9 @@ from target_bigquery.validate_json_schema import (
     validate_json_schema_completeness,
     check_schema_for_dupes_in_field_names,
 )
-from typing import Any, Dict, List
+
+from google.cloud.bigquery import SchemaField
+from jsonschema.validators import validator_for
 
 logger = singer.get_logger()
 

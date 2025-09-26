@@ -1,6 +1,6 @@
 import re
 import singer
-from target_bigquery.schema import create_valid_bigquery_name
+from target_bigquery.bigquery_schema import create_valid_bigquery_name
 
 LOGGER = singer.get_logger()
 
