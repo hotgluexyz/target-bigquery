@@ -3,6 +3,7 @@ the purpose of this module is to convert JSON schema to BigQuery schema.
 """
 
 import re
+from functools import lru_cache
 
 from target_bigquery.simplify_json_schema import (
     BQ_DECIMAL_SCALE_MAX,
@@ -27,6 +28,7 @@ METADATA_FIELDS = {
 }
 
 
+@lru_cache(maxsize=2048)
 def create_valid_bigquery_name(column_name: str) -> str:
     """
     Transforms a given column name into a BigQuery-compliant column name.
