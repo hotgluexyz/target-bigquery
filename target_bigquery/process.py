@@ -142,6 +142,9 @@ class SingerProcessor:
         # Total row counter across all streams
         self.total_cached_rows = 0
 
+        # PyArrow schema cache for nested structures
+        self.nested_schema_cache: Dict[str, pa.Schema] = {}
+
     def __enter__(self):
         """Context manager entry."""
         return self
@@ -344,6 +347,7 @@ class SingerProcessor:
             nr,
             self.pyarrow_schemas[stream_name],
             self.big_query_schema_dicts[stream_name],
+            self.nested_schema_cache,
         )
 
         self.rows[stream_name].append(converted_row)

@@ -125,7 +125,7 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
 
 
 def convert_and_filter_record_to_pyarrow(
-    record: Any, schema: pa.Schema, bq_schema_dict: Dict[str, Any] = None
+    record: Any, schema: pa.Schema, bq_schema_dict: Dict[str, Any] = None, schema_cache: Dict[str, pa.Schema] = None
 ) -> Dict[str, Any]:
     """
     Unified function that combines schema filtering and PyArrow type conversion.
@@ -167,14 +167,19 @@ def convert_and_filter_record_to_pyarrow(
         if pa.types.is_struct(field.type):
             # Nested record - recurse
             if isinstance(value, dict):
-                nested_schema = pa.schema(field.type)
+                # Use schema cache for nested structures
+                field_type_str = str(field.type)
+                if schema_cache is not None and field_type_str not in schema_cache:
+                    schema_cache[field_type_str] = pa.schema(field.type)
+                nested_schema = schema_cache[field_type_str] if schema_cache else pa.schema(field.type)
+
                 nested_bq_schema = (
                     bq_schema_dict.get(field_name, {}).get("fields", {})
                     if bq_schema_dict
                     else {}
                 )
                 converted_row[field_name] = convert_and_filter_record_to_pyarrow(
-                    value, nested_schema, nested_bq_schema
+                    value, nested_schema, nested_bq_schema, schema_cache
                 )
             else:
                 logger.warning(
@@ -190,15 +195,19 @@ def convert_and_filter_record_to_pyarrow(
 
                 for element in value:
                     if pa.types.is_struct(element_type):
-                        # Array of nested records
-                        nested_schema = pa.schema(element_type)
+                        # Array of nested records - use schema cache
+                        element_type_str = str(element_type)
+                        if schema_cache is not None and element_type_str not in schema_cache:
+                            schema_cache[element_type_str] = pa.schema(element_type)
+                        nested_schema = schema_cache[element_type_str] if schema_cache else pa.schema(element_type)
+
                         nested_bq_schema = (
                             bq_schema_dict.get(field_name, {}).get("fields", {})
                             if bq_schema_dict
                             else {}
                         )
                         converted_element = convert_and_filter_record_to_pyarrow(
-                            element, nested_schema, nested_bq_schema
+                            element, nested_schema, nested_bq_schema, schema_cache
                         )
                     else:
                         # Array of primitives
