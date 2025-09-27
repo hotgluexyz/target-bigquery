@@ -24,7 +24,7 @@ from target_bigquery.validate_json_schema import (
 )
 
 from google.cloud.bigquery import SchemaField
-from jsonschema.validators import validator_for
+import fastjsonschema
 
 logger = singer.get_logger()
 
@@ -286,9 +286,11 @@ class SingerProcessor:
 
         # Get schema validator for stream
         if self.target_config.validate_records:
-            validator_cls = validator_for(message.schema)
-            validator_cls.check_schema(message.schema)
-            self.validators[stream_name] = validator_cls(message.schema)
+            try:
+                self.validators[stream_name] = fastjsonschema.compile(message.schema)
+            except Exception as e:
+                logger.error(f"Invalid JSON schema for stream {stream_name}: {e}")
+                raise
 
         # Generate BigQuery schema for stream
         schema_simplified = simplify(self.json_schemas[stream_name])
@@ -322,7 +324,11 @@ class SingerProcessor:
         validator = self.validators[stream_name]
 
         if self.target_config.validate_records:
-            validator.validate(message.record, schema)
+            try:
+                validator(message.record)
+            except fastjsonschema.JsonSchemaException as e:
+                logger.error(f"Record validation failed for stream {stream_name}: {e}")
+                raise
 
         nr = cleanup_record(schema, message.record)
 
