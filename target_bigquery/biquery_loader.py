@@ -1,11 +1,18 @@
 import singer
 
-from typing import Dict
+from typing import Dict, List
 from concurrent.futures import ThreadPoolExecutor
 
 from google.cloud import bigquery
 from google.cloud import storage
 from google.cloud.bigquery import LoadJobConfig, WriteDisposition, SourceFormat
+
+from target_bigquery.config import (
+    TablesConfig,
+    TargetConfig,
+    TableConfig,
+    ReplicationMethod,
+)
 
 logger = singer.get_logger()
 
@@ -21,45 +28,47 @@ class BigQueryLoader:
 
     def __init__(
         self,
-        project_id: str,
-        dataset_id: str,
-        bucket_name: str,
-        location: str,
+        target_config: TargetConfig,
+        tables_config: TablesConfig,
         parquet_files: Dict[str, str],
+        key_properties: Dict[str, List[str]],
     ):
         """
         Initialize the BigQuery loader.
 
         Args:
-            project_id: Google Cloud project ID
-            dataset_id: BigQuery dataset ID where tables will be created
-            bucket_name: Google Cloud Storage bucket name for staging files
-            location: Geographic location for BigQuery operations
+            target_config: Target configuration settings
             parquet_files: Dictionary mapping stream names to parquet file paths
+            tables_config: Table-specific configuration settings
+            key_properties: Dictionary mapping stream names to key properties
         """
-        self.project_id = project_id
-        self.dataset_id = dataset_id
-        self.bucket_name = bucket_name
+        self.target_config = target_config
+        self.tables_config = tables_config
         self.parquet_files = parquet_files
+        self.key_properties = key_properties
         self.uploaded_blob_uris: Dict[str, str] = {}
-        self.bq_client = bigquery.Client(project=project_id, location=location)
-        self.storage_client = storage.Client(project=project_id)
+        self.bq_client = bigquery.Client(
+            project=self.target_config.project_id, location=self.target_config.location
+        )
+        self.storage_client = storage.Client(project=self.target_config.project_id)
 
     def load(self):
         """Execute the complete load process: upload to GCS and immediately start BigQuery load jobs."""
 
-        bucket = self.storage_client.bucket(self.bucket_name)
+        bucket = self.storage_client.bucket(self.target_config.google_storage_bucket)
 
         def upload_and_load(stream_name: str, parquet_file: str):
             """Upload a file to GCS and immediately start a BigQuery load job for it."""
-            logger.info(f"Uploading {stream_name} parquet data to Google Cloud Storage: {parquet_file}")
+            logger.info(
+                f"Uploading {stream_name} parquet data to Google Cloud Storage: {parquet_file}"
+            )
 
             # Upload to GCS
             blob_name = f"{stream_name}.parquet"
             blob = bucket.blob(blob_name)
             blob.upload_from_filename(parquet_file)
 
-            source_uri = f"gs://{self.bucket_name}/{blob_name}"
+            source_uri = f"gs://{self.target_config.google_storage_bucket}/{blob_name}"
             logger.info(f"Successfully uploaded {stream_name} to GCS: {source_uri}")
 
             # Immediately start BigQuery load job
@@ -83,8 +92,9 @@ class BigQueryLoader:
                     logger.error(f"Upload and load operation failed: {e}")
 
             if failed_operations:
-                raise Exception(f"Failed {len(failed_operations)} upload/load operations: {'; '.join(failed_operations)}")
-
+                raise Exception(
+                    f"Failed {len(failed_operations)} upload/load operations: {'; '.join(failed_operations)}"
+                )
 
     def _create_bigquery_load_job(self, stream_name: str, source_uri: str):
         """Create and execute a BigQuery load job for a single stream.
@@ -93,13 +103,29 @@ class BigQueryLoader:
             stream_name: Name of the data stream/table
             source_uri: GCS URI of the parquet file to load
         """
+        replication_method = self._get_table_replication_method(stream_name)
+        cluster_fields = self._get_table_cluster_fields(stream_name)
+        partition_field = self._get_table_partition_field(stream_name)
+
+        if replication_method == ReplicationMethod.INCREMENTAL:
+            # TODO: implement incremental replication method
+            return
+
         job_config = LoadJobConfig(
             source_format=SourceFormat.PARQUET,
-            write_disposition=WriteDisposition.WRITE_APPEND,
+            write_disposition=self._get_write_disposition(replication_method),
             allow_quoted_newlines=True,
         )
 
-        table_id = f"{self.project_id}.{self.dataset_id}.{stream_name}"
+        if cluster_fields:
+            job_config.clustering_fields = cluster_fields
+
+        if partition_field:
+            job_config.time_partitioning = bigquery.table.TimePartitioning(
+                type_=bigquery.table.TimePartitioningType.DAY, field=partition_field
+            )
+
+        table_id = f"{self.target_config.project_id}.{self.target_config.dataset_id}.{stream_name}"
 
         try:
             load_job = self.bq_client.load_table_from_uri(
@@ -114,3 +140,42 @@ class BigQueryLoader:
             f"Successfully loaded {stream_name} into BigQuery table: {table_id}"
         )
 
+    def _get_table_replication_method(self, stream_name: str) -> ReplicationMethod:
+        if (
+            self.tables_config.streams.get(
+                stream_name, TableConfig()
+            ).replication_method
+            == "truncate"
+            or self.tables_config.streams.get(stream_name, TableConfig()).truncate
+        ):
+            return ReplicationMethod.TRUNCATE
+        elif self.target_config.replication_method == ReplicationMethod.INCREMENTAL:
+            if self.key_properties[stream_name]:
+                return ReplicationMethod.INCREMENTAL
+            else:
+                # If the stream has no key properties, we can't use incremental replication method, so we fallback to truncate.
+                # The global replication method fallback is append, so this is a bit confusing, but it preserves the existing behavior.
+                return ReplicationMethod.TRUNCATE
+
+        else:
+            return ReplicationMethod.APPEND
+
+    def _get_write_disposition(
+        self, replication_method: ReplicationMethod
+    ) -> WriteDisposition:
+        return (
+            WriteDisposition.WRITE_APPEND
+            if replication_method == ReplicationMethod.APPEND
+            else WriteDisposition.WRITE_TRUNCATE
+        )
+
+    def _get_table_force_fields(self, stream_name: str) -> dict:
+        return self.tables_config.streams.get(stream_name, TableConfig()).force_fields
+
+    def _get_table_partition_field(self, stream_name: str) -> str:
+        return self.tables_config.streams.get(
+            stream_name, TableConfig()
+        ).partition_field
+
+    def _get_table_cluster_fields(self, stream_name: str) -> list[str]:
+        return self.tables_config.streams.get(stream_name, TableConfig()).cluster_fields

@@ -19,7 +19,7 @@ class ForceField(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     type: str
-    mode: Optional[str] = None
+    mode: Optional[str] = "nullable"
     description: Optional[str] = None
 
 
@@ -30,6 +30,7 @@ class TableConfig(BaseModel):
     cluster_fields: list[str] = Field(default_factory=list)
     replication_method: Optional[ReplicationMethod] = None
     force_fields: dict[str, ForceField] = Field(default_factory=dict)
+    truncate: Optional[bool] = None
 
 
 class TablesConfig(BaseModel):
@@ -48,7 +49,7 @@ class TargetConfig(BaseModel):
     # Fields with defaults
     location: str = "US"
     replication_method: Optional[ReplicationMethod] = None
-    truncate_on_full_sync: Optional[bool] = None
+    truncate_on_full_sync: Optional[bool] = False
     table_prefix: str = ""
     table_suffix: str = ""
     validate_records: bool = True

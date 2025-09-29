@@ -324,9 +324,9 @@ class SingerProcessor:
             )
 
         schema = self.json_schemas[stream_name]
-        validator = self.validators[stream_name]
 
         if self.target_config.validate_records:
+            validator = self.validators[stream_name]
             try:
                 validator(message.record)
             except fastjsonschema.JsonSchemaException as e:
@@ -403,7 +403,7 @@ class SingerProcessor:
         for line in tap_stream:
             self.process_line(line)
 
-        return self.on_complete()
+        return self.on_complete(), self.key_properties
 
     def on_complete(self):
         """

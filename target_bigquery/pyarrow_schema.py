@@ -34,7 +34,7 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
                     return None
                 try:
                     # Try fast ISO format parsing first (handles most cases)
-                    return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
                 except ValueError:
                     # Fallback to slower but more flexible dateutil parser
                     try:
@@ -125,7 +125,10 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
 
 
 def convert_and_filter_record_to_pyarrow(
-    record: Any, schema: pa.Schema, bq_schema_dict: Dict[str, Any] = None, schema_cache: Dict[str, pa.Schema] = None
+    record: Any,
+    schema: pa.Schema,
+    bq_schema_dict: Dict[str, Any] = None,
+    schema_cache: Dict[str, pa.Schema] = None,
 ) -> Dict[str, Any]:
     """
     Unified function that combines schema filtering and PyArrow type conversion.
@@ -171,7 +174,11 @@ def convert_and_filter_record_to_pyarrow(
                 field_type_str = str(field.type)
                 if schema_cache is not None and field_type_str not in schema_cache:
                     schema_cache[field_type_str] = pa.schema(field.type)
-                nested_schema = schema_cache[field_type_str] if schema_cache else pa.schema(field.type)
+                nested_schema = (
+                    schema_cache[field_type_str]
+                    if schema_cache
+                    else pa.schema(field.type)
+                )
 
                 nested_bq_schema = (
                     bq_schema_dict.get(field_name, {}).get("fields", {})
@@ -197,9 +204,16 @@ def convert_and_filter_record_to_pyarrow(
                     if pa.types.is_struct(element_type):
                         # Array of nested records - use schema cache
                         element_type_str = str(element_type)
-                        if schema_cache is not None and element_type_str not in schema_cache:
+                        if (
+                            schema_cache is not None
+                            and element_type_str not in schema_cache
+                        ):
                             schema_cache[element_type_str] = pa.schema(element_type)
-                        nested_schema = schema_cache[element_type_str] if schema_cache else pa.schema(element_type)
+                        nested_schema = (
+                            schema_cache[element_type_str]
+                            if schema_cache
+                            else pa.schema(element_type)
+                        )
 
                         nested_bq_schema = (
                             bq_schema_dict.get(field_name, {}).get("fields", {})

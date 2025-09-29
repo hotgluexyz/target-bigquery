@@ -388,10 +388,10 @@ def build_schema(schema, key_properties=None, add_metadata=True, force_fields={}
 
             next_field = SchemaField(
                 field_name,
-                force_fields[field_name]["type"],
-                force_fields[field_name].get("mode", "nullable"),
-                force_fields[field_name].get("description", None),
-                (),
+                force_fields[field_name].type,
+                force_fields[field_name].mode,
+                description=force_fields[field_name].description,
+                fields=(),
             )
 
         else:
