@@ -46,47 +46,45 @@ class BigQueryLoader:
         self.storage_client = storage.Client(project=project_id)
 
     def load(self):
-        """Execute the complete load process: upload to GCS then load to BigQuery."""
-        self._upload_parquet_files_to_google_cloud_storage()
-        self._load_parquet_files_to_bigquery()
+        """Execute the complete load process: upload to GCS and immediately start BigQuery load jobs."""
 
-    def _upload_parquet_files_to_google_cloud_storage(self):
-        """Upload all parquet files to Google Cloud Storage in parallel."""
         bucket = self.storage_client.bucket(self.bucket_name)
 
-        def upload_file(stream_name: str, parquet_file: str) -> tuple[str, str]:
-            """Upload a single parquet file to GCS and return stream name and URI."""
-            logger.info(
-                f"Uploading {stream_name} parquet data to Google Cloud Storage: {parquet_file}"
-            )
+        def upload_and_load(stream_name: str, parquet_file: str):
+            """Upload a file to GCS and immediately start a BigQuery load job for it."""
+            logger.info(f"Uploading {stream_name} parquet data to Google Cloud Storage: {parquet_file}")
 
+            # Upload to GCS
             blob_name = f"{stream_name}.parquet"
             blob = bucket.blob(blob_name)
             blob.upload_from_filename(parquet_file)
 
-            uri = f"gs://{self.bucket_name}/{blob_name}"
-            logger.info(f"Successfully uploaded {stream_name} to GCS: {uri}")
-            return stream_name, uri
+            source_uri = f"gs://{self.bucket_name}/{blob_name}"
+            logger.info(f"Successfully uploaded {stream_name} to GCS: {source_uri}")
+
+            # Immediately start BigQuery load job
+            self._create_bigquery_load_job(stream_name, source_uri)
+
+            return stream_name, source_uri
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [
-                executor.submit(upload_file, stream_name, parquet_file)
+                executor.submit(upload_and_load, stream_name, parquet_file)
                 for stream_name, parquet_file in self.parquet_files.items()
             ]
 
-            failed_uploads = []
+            failed_operations = []
             for future in futures:
                 try:
                     stream_name, uri = future.result()
                     self.uploaded_blob_uris[stream_name] = uri
                 except Exception as e:
-                    failed_uploads.append(str(e))
-                    logger.error(f"GCS upload failed: {e}")
+                    failed_operations.append(str(e))
+                    logger.error(f"Upload and load operation failed: {e}")
 
-            if failed_uploads:
-                raise Exception(
-                    f"Failed to upload {len(failed_uploads)} files to GCS: {'; '.join(failed_uploads)}"
-                )
+            if failed_operations:
+                raise Exception(f"Failed {len(failed_operations)} upload/load operations: {'; '.join(failed_operations)}")
+
 
     def _create_bigquery_load_job(self, stream_name: str, source_uri: str):
         """Create and execute a BigQuery load job for a single stream.
@@ -116,28 +114,3 @@ class BigQueryLoader:
             f"Successfully loaded {stream_name} into BigQuery table: {table_id}"
         )
 
-    def _load_parquet_files_to_bigquery(self):
-        """Load all uploaded parquet files to BigQuery using parallel load jobs.
-
-        Uses ThreadPoolExecutor to run multiple load jobs concurrently.
-        Collects and reports any failures after all jobs complete.
-        """
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [
-                executor.submit(self._create_bigquery_load_job, stream_name, source_uri)
-                for stream_name, source_uri in self.uploaded_blob_uris.items()
-            ]
-
-            failed_jobs = []
-            for future in futures:
-                try:
-                    future.result()
-                except Exception as e:
-                    failed_jobs.append(str(e))
-                    logger.error(f"BigQuery load job failed: {e}")
-
-            if failed_jobs:
-                raise Exception(
-                    f"Failed to load {len(failed_jobs)} tables to BigQuery: {'; '.join(failed_jobs)}"
-                )
