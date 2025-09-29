@@ -1,7 +1,0 @@
-{
-    "streams": {
-      "exchange_rate": {
-        "partition_field": "date",
-        "cluster_fields": []
-      }
-}}

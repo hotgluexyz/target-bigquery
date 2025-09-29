@@ -1,0 +1,30 @@
+{
+  "streams": {
+    "users": {
+      "partition_field": "created_at",
+      "cluster_fields": ["user_id", "email"],
+      "replication_method": "truncate",
+      "truncate": true,
+      "force_fields": {
+        "user_id": {
+          "type": "string",
+          "mode": "required"
+        },
+        "email": {
+          "type": "string",
+          "mode": "nullable"
+        }
+      }
+    },
+    "orders": {
+      "partition_field": "order_date",
+      "cluster_fields": ["customer_id"],
+      "force_fields": {}
+    },
+    "products": {
+      "partition_field": null,
+      "cluster_fields": [],
+      "force_fields": {}
+    }
+  }
+}

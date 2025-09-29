@@ -112,51 +112,107 @@ Create a service account credential:
 
 ## Configuration
 
-### Target config file
+### Target config file (Main Configuration)
 
 Create a file called **target-config.json** in your working directory, following this
-sample [target-config.json](/sample_config/target-config-exchange-rates-api.json) file (or see the example below).
+sample [target-config.json](/sample_config/config.json) file (or see the example below).
 
-- Required parameters are the project name `project_id` and `dataset_id`.
-- Optional parameters are `table_suffix`, `validate records`, `add_metadata_columns`, `location` and `table_config`.
-- Default data location is "US" (if your location is not the US, you can indicate a different location in your **
-  target-config.json** file).
-- The data will be written to the dataset specified in your **target-config.json**.
-- If you do not have the dataset with this name yet, it will be created.
-- The table will be created.
-- There's an optional parameter `replication_method` that can either be:
-    * `append`: Adding new rows to the table (Default value)
-    * `truncate`: Deleting all previous rows and uploading the new ones to the table
-    * `incremental`: **Upserting** new rows into the table, using the **primary key** given by the tap connector
-      (if it finds an old row with same key, updates it. Otherwise it inserts the new row)
- - WARNING: We do not recommend using `incremental` option (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data.
+#### Required Parameters
+- **`project_id`** (string): Your Google Cloud Platform project ID
+- **`dataset_id`** (string): BigQuery dataset name where tables will be created
 
-Sample **target-config.json** file:
+#### Optional Parameters
 
-```
+**BigQuery Configuration:**
+- **`location`** (string, default: `"US"`): BigQuery dataset location (e.g., `"US"`, `"EU"`, `"asia-southeast1"`)
+- **`table_prefix`** (string, default: `""`): Prefix added to all table names
+- **`table_suffix`** (string, default: `""`): Suffix added to all table names
+- **`force_alphanumeric_table_names`** (boolean, default: `false`): Force table names to be alphanumeric only
+
+**Replication Method (Global):**
+- **`replication_method`** (string, default: `"append"`):
+  - `"append"`: Add new rows to existing tables (default)
+  - `"truncate"`: Delete all existing rows and insert new ones
+  - `"incremental"`: Upsert rows using primary keys (⚠️ **Not recommended**)
+- **`truncate_on_full_sync`** (boolean, default: `false`): Force truncate when `SYNC_TYPE=full_sync` environment variable is set
+
+**Data Processing:**
+- **`validate_records`** (boolean, default: `true`): Validate incoming records against schema
+- **`add_metadata_columns`** (boolean, default: `true`): Add Singer metadata columns (`_sdc_batched_at`, `_sdc_deleted_at`, etc.)
+
+**Table Configuration:**
+- **`table_config`** (string): Path to table-specific configuration file (alternative to `--tables` CLI flag)
+
+#### Sample target-config.json file:
+
+```json
 {
     "project_id": "{your_GCP_project_id}",
     "dataset_id": "{your_dataset_id}",
-    "table_suffix": "_sample_table_suffix",
+    "location": "EU",
+    "replication_method": "append",
+    "table_prefix": "src_",
+    "table_suffix": "_v1",
     "validate_records": true,
     "add_metadata_columns": true,
-    "location": "EU",
-    "table_config": "target-tables-config.json"
+    "force_alphanumeric_table_names": false,
+    "merge_state_messages": true,
+    "table_config": "target-tables-config.json",
+    "max_cache": 100
 }
 ```
 
-### target-tables-config file
-
-We pass **target-tables-config.json** as a command line argument.
-
-```bash
-cat data.singer | ./target-bigquery \
-  --config sample_config/target-config-exchange-rates-api.json  \
-  -t sample_config/target-tables-config-exchange-rates-api.json > sample_config/state.json
+#### Minimal Configuration:
+```json
+{
+    "project_id": "my-project",
+    "dataset_id": "my_dataset"
+}
 ```
 
-- If you don't want to pass **target-tables-config.json** file as a CLI argument, you can
-  add ```"table_config": "target-tables-config.json"``` to your **target-config.json** file.
+⚠️ **WARNING**: We do not recommend using `incremental` replication method (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data.
+
+#### CLI Flags
+
+The following command-line flags can override configuration file settings:
+
+- **`-c, --config`** (required): Path to main target configuration file
+- **`-t, --tables`**: Path to table configuration file (overrides `table_config` in main config)
+- **`-s, --state`**: Path to initial state file
+
+#### Environment Variables
+
+- **`GOOGLE_APPLICATION_CREDENTIALS`**: Path to Google Cloud service account JSON file
+- **`SYNC_TYPE`**: When set to `"full_sync"`, triggers truncate if `truncate_on_full_sync: true` in config
+
+### Table Configuration File
+
+Table-specific configurations can be provided via the `--tables` CLI flag or the `table_config` parameter in the main config file.
+
+#### Usage Options
+
+**Option 1: CLI Flag (Recommended)**
+```bash
+cat data.singer | ./target-bigquery \
+  --config sample_config/config.json  \
+  -t sample_config/target-tables-config.json > sample_config/state.json
+```
+
+**Option 2: Config File Parameter**
+Add `"table_config": "target-tables-config.json"` to your main target-config.json file.
+
+#### Supported Table-Level Properties
+
+**BigQuery Table Properties:**
+- **`partition_field`** (string|null): Field name for BigQuery time partitioning (DAY partitioning)
+- **`cluster_fields`** (array): List of field names for BigQuery clustering (max 4 fields)
+- **`force_fields`** (object): Schema field overrides for specific columns
+
+**Replication Method Overrides (Limited):**
+- **`truncate`** (boolean): Force truncate mode for this table (overrides global setting)
+- **`replication_method`** (string): Only `"truncate"` value is supported as table-level override
+
+⚠️ **IMPORTANT**: Table-level replication method overrides are **limited**. Only `truncate` can be overridden at the table level. Setting `replication_method` to `"append"` or `"incremental"` at the table level has **no effect** - the global replication method setting will be used instead.
 
 
 **Partitioning background**
@@ -186,17 +242,16 @@ You can partition BigQuery tables by:
 - You can cluster up to 4 columns in a table
 
 
-#### target-tables-config file: Setting up partitioning and clustering
+#### Table Configuration Examples
 
-To configure partitioning and clustering in BigQuery destination tables, we create **target-tables-config.json**:
-
-```
+**Basic Partitioning and Clustering:**
+```json
 {
     "streams": {
-      "charges": {
-        "partition_field": "updated_at",
-        "cluster_fields": ["type", "status", "customer_id", "transaction_id"]
-      }
+        "charges": {
+            "partition_field": "updated_at",
+            "cluster_fields": ["type", "status", "customer_id", "transaction_id"]
+        }
     }
 }
 ```
@@ -214,41 +269,28 @@ Load data data into BigQuery, while configuring target tables.
 
 <img src="readme_screenshots/14_Partitioned_Table.png" width="650" alt="Download the service account credential JSON file">
 
-##### target-tables-config file: force data types and modes
+#### Schema Field Overrides (`force_fields`)
 
-#### Problem:
+**Problem:**
+- Normally, tap catalog file governs schema of data which will be loaded into target-bigquery
+- However, sometimes you can get a column of an undesired data type, which is not following your tap-catalog file
 
-- Normally, tap catalog file governs schema of data which will be loaded into target-bigquery.
-- However, sometimes you can get a column of an undesired data type, which is not following your tap-catalog file.
+**Solution:**
+- You can force that column to the desired data type by using `force_fields` flag inside your target-tables-config.json file
 
-#### Solution:
+**Example:**
+- We used this solution to fix `"date_start"` field from `"ads_insights_age_and_gender"` stream from tap-facebook
+- In tap catalog file, we said we wanted this column to be a **date**
+- However, the tap generates schema where this column is a **string**, despite our tap catalog file
+- Therefore, we used `force_fields` flag in target-tables-config.json to override what the tap generates and force the column to be a date
 
-- You can force that column to the desired data type by using `force_fields` flag inside your *
-  target-tables-config.json* file.
+**Supported Field Types:**
+- `STRING`, `INTEGER`, `FLOAT`, `BOOLEAN`, `TIMESTAMP`, `DATE`, `TIME`, `DATETIME`, `NUMERIC`, `BIGNUMERIC`, `BYTES`, `RECORD`, `GEOGRAPHY`
 
-#### Example:
-
-- We used this solution to fix `"date_start"` field from `"ads_insights_age_and_gender"` stream from tap-facebook.
-- In tap catalog file, we said we wanted this column to be a **date**.
-- However, the tap generates schema where this column is a **string**, despite our tap catalog file.
-- Therefore, we used `force_fields` flag in target-tables-config.json to override what the tap generates and force the
-  column to be a date.
-- Example of *target-tables-config.json* file:
-
-```
-{
-    "streams": {
-      "ads_insights_age_and_gender": {
-        "partition_field": "date_start",
-        "cluster_fields": ["age", "gender","account_id", "campaign_id"],
-        "force_fields": {
-          "date_start": {"type": "DATE", "mode":  "NULLABLE"},
-          "date_stop": {"type": "DATE", "mode":  "NULLABLE"}
-        }
-      }
-    }
-}
-```
+**Supported Field Modes:**
+- `NULLABLE`: Field can contain null values (default)
+- `REQUIRED`: Field cannot contain null values
+- `REPEATED`: Field can contain multiple values (array)
 
 ## Note about BigQuery table/columns names
 
