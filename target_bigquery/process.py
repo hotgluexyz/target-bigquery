@@ -31,75 +31,27 @@ logger = singer.get_logger()
 STREAM_ROW_CACHE_SIZE = 75000
 
 
-def cleanup_record(schema, record):
+class ProcessResult:
     """
-    Recursively sanitize field names in a record to comply with BigQuery naming conventions.
+    Result of the SingerProcessor.process() method.
 
-    This function processes incoming Singer tap records by transforming all field names
-    to meet BigQuery column naming requirements. It handles nested objects and arrays
-    recursively, ensuring all field names are valid BigQuery identifiers.
-
-    BigQuery naming rules applied:
-    - Replace non-alphanumeric characters (except underscores) with underscores
-    - Ensure field names start with letter or underscore
-    - Truncate to 300 characters maximum
-    - Avoid reserved prefixes
-
-    :param schema: JSON schema for the record (currently unused but kept for API compatibility)
-    :param record: Raw record data from Singer tap (dict, list, or primitive value)
-    :return: Record with sanitized field names that comply with BigQuery naming conventions
-    :raises Exception: If record contains unsupported data types
+    Attributes:
+        parquet_files: Dictionary mapping stream names to parquet file paths
+        key_properties: Dictionary mapping stream names to key properties
+        table_names: Dictionary mapping stream names to table names
+        big_query_schemas: Dictionary mapping stream names to BigQuery schemas (list of SchemaField)
     """
-    if not isinstance(record, dict) and not isinstance(record, list):
-        return record
-
-    elif isinstance(record, list):
-        nr = []
-        for item in record:
-            nr.append(cleanup_record(schema, item))
-        return nr
-
-    elif isinstance(record, dict):
-        nr = {}
-        for key, value in record.items():
-            nkey = create_valid_bigquery_name(key)
-            nr[nkey] = cleanup_record(schema, value)
-        return nr
-
-    else:
-        raise Exception(f"unhandled instance of record: {record}")
-
-
-def build_table_name(
-    stream_name: str, prefix: str, suffix: str, force_alphanumeric_table_names: bool
-):
-    table_name = "{}{}{}".format(prefix, stream_name, suffix)
-    if force_alphanumeric_table_names:
-        return create_valid_bigquery_name(table_name)
-    else:
-        return table_name
-
-
-def build_bq_schema_dict(schema):
-    """
-    Convert BigQuery schema as a list to BigQuery schema as a dictionary
-
-    :param schema, list of BigQuery SchemaFields
-    :return: schema_dict, dict. Dict of BigQuery schema fields.
-        Dict key is field name
-        Dict value is a dict also. It has BigQuery mode and type
-    """
-    schema_dict = {}
-    for field in schema:
-        f = field if isinstance(field, dict) else field.to_api_repr()
-
-        f = copy.deepcopy(f)
-        schema_dict[f["name"]] = f
-        if f.get("fields"):
-            schema_dict[f["name"]]["fields"] = build_bq_schema_dict(f["fields"])
-        schema_dict[f["name"]].pop("description")
-        schema_dict[f["name"]].pop("name")
-    return schema_dict
+    def __init__(
+        self,
+        parquet_files: Dict[str, str],
+        key_properties: Dict[str, List[str]],
+        table_names: Dict[str, str],
+        big_query_schemas: Dict[str, List[SchemaField]]
+    ):
+        self.parquet_files = parquet_files
+        self.key_properties = key_properties
+        self.table_names = table_names
+        self.big_query_schemas = big_query_schemas
 
 
 class SingerProcessor:
@@ -153,6 +105,238 @@ class SingerProcessor:
         """Context manager exit - ensures parquet writers are closed."""
         self._close_parquet_writers()
         return False  # Don't suppress exceptions
+
+    def process(self, tap_stream: io.TextIOWrapper):
+        """
+        Process the complete Singer tap stream.
+
+        Reads lines from the tap stream, processes each message,
+        and returns the generated parquet files when complete.
+
+        Args:
+            tap_stream: Text stream containing Singer messages
+
+        Returns:
+            Dictionary mapping stream names to parquet file paths
+        """
+        for line in tap_stream:
+            self._process_line(line)
+
+        return self._on_complete()
+
+    def _process_line(self, line: str):
+        """
+        Process a single line from the Singer tap stream.
+
+        Parses the JSON message and routes it to the appropriate handler
+        based on message type (SCHEMA, RECORD, or STATE).
+
+        Args:
+            line: Raw JSON line from Singer tap
+        """
+        try:
+            message = singer.parse_message(line)
+        except json.decoder.JSONDecodeError:
+            logger.error(f"Failed to parse JSON message: {line.strip()}")
+            raise
+
+        if isinstance(message, singer.RecordMessage):
+            self._handle_record_message(message)
+
+        elif isinstance(message, singer.SchemaMessage):
+            self._handle_schema_message(message)
+
+        elif isinstance(message, singer.StateMessage):
+            self._handle_state_message(message)
+
+        else:
+            raise Exception("Unrecognized message {}".format(message))
+
+    def _on_complete(self):
+        """
+        Complete processing and finalize all parquet files.
+
+        Flushes any remaining buffered rows to disk, closes all parquet writers,
+        and returns the mapping of stream names to their parquet file paths.
+
+        Returns:
+            Dictionary mapping stream names to absolute parquet file paths
+        """
+
+        if self.total_cached_rows > 0:
+            self._flush_all_streams()
+
+        self._close_parquet_writers()
+
+        logger.info("Completed processing and wrote all parquet files")
+
+        return ProcessResult(
+            parquet_files=self.parquet_files,
+            key_properties=self.key_properties,
+            table_names=self.table_names,
+            big_query_schemas=self.big_query_schemas,
+        )
+
+    def _handle_schema_message(self, message: singer.SchemaMessage):
+        stream_name = message.stream
+        if stream_name in self.table_names:
+            return
+
+        self.table_names[stream_name] = self._build_table_name(
+            stream_name,
+            self.target_config.table_prefix,
+            self.target_config.table_suffix,
+            self.target_config.force_alphanumeric_table_names,
+        )
+
+        self.json_schemas[stream_name] = message.schema
+        validate_json_schema_completeness(self.json_schemas[stream_name])
+        check_schema_for_dupes_in_field_names(
+            stream_name=stream_name, schema=self.json_schemas[stream_name]
+        )
+
+        self.key_properties[stream_name] = message.key_properties
+
+        # Get schema validator for stream
+        if self.target_config.validate_records:
+            try:
+                self.validators[stream_name] = fastjsonschema.compile(message.schema)
+            except Exception as e:
+                logger.error(f"Invalid JSON schema for stream {stream_name}: {e}")
+                raise
+
+        # Generate BigQuery schema for stream
+        schema_simplified = simplify(self.json_schemas[stream_name])
+        schema = build_schema(
+            schema=schema_simplified,
+            key_properties=self.key_properties[stream_name],
+            add_metadata=self.target_config.add_metadata_columns,
+            force_fields=self.tables_config.streams.get(
+                stream_name, TableConfig()
+            ).force_fields,
+        )
+        self.big_query_schemas[stream_name] = schema
+        self.big_query_schema_dicts[stream_name] = self._build_bq_schema_dict(schema)
+
+        self.rows[stream_name] = []
+
+        # Create PyArrow schema from BigQuery SchemaFields
+        self.pyarrow_schemas[stream_name] = bq_schema_to_pyarrow_schema(schema)
+
+        logger.info(f"Processed SCHEMA message for stream: {message.stream}")
+
+    def _handle_record_message(self, message: singer.RecordMessage):
+        stream_name = message.stream
+
+        if stream_name not in self.json_schemas:
+            raise Exception(
+                f"A record for stream {stream_name} was encountered before a corresponding schema"
+            )
+
+        schema = self.json_schemas[stream_name]
+
+        if self.target_config.validate_records:
+            validator = self.validators[stream_name]
+            try:
+                validator(message.record)
+            except fastjsonschema.JsonSchemaException as e:
+                logger.error(f"Record validation failed for stream {stream_name}: {e}")
+                raise
+
+        nr = self._cleanup_record(schema, message.record)
+
+        if self.target_config.add_metadata_columns:
+            nr["_time_extracted"] = (
+                message.time_extracted.isoformat()
+                if message.time_extracted
+                else datetime.utcnow().isoformat()
+            )
+            nr["_time_loaded"] = datetime.utcnow().isoformat()
+
+        converted_row = convert_and_filter_record_to_pyarrow(
+            nr,
+            self.pyarrow_schemas[stream_name],
+            self.big_query_schema_dicts[stream_name],
+            self.nested_schema_cache,
+        )
+
+        self.rows[stream_name].append(converted_row)
+        self.total_cached_rows += 1
+
+        if self.total_cached_rows >= STREAM_ROW_CACHE_SIZE:
+            self._flush_all_streams()
+
+    def _handle_state_message(self, message: singer.StateMessage):
+        pass
+
+    def _cleanup_record(self, schema, record):
+        """
+        Recursively sanitize field names in a record to comply with BigQuery naming conventions.
+
+        This function processes incoming Singer tap records by transforming all field names
+        to meet BigQuery column naming requirements. It handles nested objects and arrays
+        recursively, ensuring all field names are valid BigQuery identifiers.
+
+        BigQuery naming rules applied:
+        - Replace non-alphanumeric characters (except underscores) with underscores
+        - Ensure field names start with letter or underscore
+        - Truncate to 300 characters maximum
+        - Avoid reserved prefixes
+
+        :param schema: JSON schema for the record (currently unused but kept for API compatibility)
+        :param record: Raw record data from Singer tap (dict, list, or primitive value)
+        :return: Record with sanitized field names that comply with BigQuery naming conventions
+        :raises Exception: If record contains unsupported data types
+        """
+        if not isinstance(record, dict) and not isinstance(record, list):
+            return record
+
+        elif isinstance(record, list):
+            nr = []
+            for item in record:
+                nr.append(self._cleanup_record(schema, item))
+            return nr
+
+        elif isinstance(record, dict):
+            nr = {}
+            for key, value in record.items():
+                nkey = create_valid_bigquery_name(key)
+                nr[nkey] = self._cleanup_record(schema, value)
+            return nr
+
+        else:
+            raise Exception(f"unhandled instance of record: {record}")
+
+
+    def _build_table_name(
+        self, stream_name: str, prefix: str, suffix: str, force_alphanumeric_table_names: bool
+    ):
+        table_name = "{}{}{}".format(prefix, stream_name, suffix)
+        if force_alphanumeric_table_names:
+            return create_valid_bigquery_name(table_name)
+        else:
+            return table_name
+
+    def _build_bq_schema_dict(self, schema):
+        """
+        Convert BigQuery schema as a list to BigQuery schema as a dictionary
+
+        :param schema, list of BigQuery SchemaFields
+        :return: schema_dict, dict. Dict of BigQuery schema fields.
+            Dict key is field name
+            Dict value is a dict also. It has BigQuery mode and type
+        """
+        schema_dict = {}
+        for field in schema:
+            f = field if isinstance(field, dict) else field.to_api_repr()
+
+            f = copy.deepcopy(f)
+            schema_dict[f["name"]] = f
+            if f.get("fields"):
+                schema_dict[f["name"]]["fields"] = self._build_bq_schema_dict(f["fields"])
+            schema_dict[f["name"]].pop("description")
+            schema_dict[f["name"]].pop("name")
+        return schema_dict
 
     def _get_parquet_writer(self, stream_name: str) -> pq.ParquetWriter:
         """
@@ -267,160 +451,3 @@ class SingerProcessor:
 
         self.parquet_writers.clear()
 
-    def handle_schema_message(self, message: singer.SchemaMessage):
-        stream_name = message.stream
-        if stream_name in self.table_names:
-            return
-
-        self.table_names[stream_name] = build_table_name(
-            stream_name,
-            self.target_config.table_prefix,
-            self.target_config.table_suffix,
-            self.target_config.force_alphanumeric_table_names,
-        )
-
-        self.json_schemas[stream_name] = message.schema
-        validate_json_schema_completeness(self.json_schemas[stream_name])
-        check_schema_for_dupes_in_field_names(
-            stream_name=stream_name, schema=self.json_schemas[stream_name]
-        )
-
-        self.key_properties[stream_name] = message.key_properties
-
-        # Get schema validator for stream
-        if self.target_config.validate_records:
-            try:
-                self.validators[stream_name] = fastjsonschema.compile(message.schema)
-            except Exception as e:
-                logger.error(f"Invalid JSON schema for stream {stream_name}: {e}")
-                raise
-
-        # Generate BigQuery schema for stream
-        schema_simplified = simplify(self.json_schemas[stream_name])
-        schema = build_schema(
-            schema=schema_simplified,
-            key_properties=self.key_properties[stream_name],
-            add_metadata=self.target_config.add_metadata_columns,
-            force_fields=self.tables_config.streams.get(
-                stream_name, TableConfig()
-            ).force_fields,
-        )
-        self.big_query_schemas[stream_name] = schema
-        self.big_query_schema_dicts[stream_name] = build_bq_schema_dict(schema)
-
-        self.rows[stream_name] = []
-
-        # Create PyArrow schema from BigQuery SchemaFields
-        self.pyarrow_schemas[stream_name] = bq_schema_to_pyarrow_schema(schema)
-
-        logger.info(f"Processed SCHEMA message for stream: {message.stream}")
-
-    def handle_record_message(self, message: singer.RecordMessage):
-        stream_name = message.stream
-
-        if stream_name not in self.json_schemas:
-            raise Exception(
-                f"A record for stream {stream_name} was encountered before a corresponding schema"
-            )
-
-        schema = self.json_schemas[stream_name]
-
-        if self.target_config.validate_records:
-            validator = self.validators[stream_name]
-            try:
-                validator(message.record)
-            except fastjsonschema.JsonSchemaException as e:
-                logger.error(f"Record validation failed for stream {stream_name}: {e}")
-                raise
-
-        nr = cleanup_record(schema, message.record)
-
-        if self.target_config.add_metadata_columns:
-            nr["_time_extracted"] = (
-                message.time_extracted.isoformat()
-                if message.time_extracted
-                else datetime.utcnow().isoformat()
-            )
-            nr["_time_loaded"] = datetime.utcnow().isoformat()
-
-        converted_row = convert_and_filter_record_to_pyarrow(
-            nr,
-            self.pyarrow_schemas[stream_name],
-            self.big_query_schema_dicts[stream_name],
-            self.nested_schema_cache,
-        )
-
-        self.rows[stream_name].append(converted_row)
-        self.total_cached_rows += 1
-
-        if self.total_cached_rows >= STREAM_ROW_CACHE_SIZE:
-            self._flush_all_streams()
-
-    def handle_state_message(self, message: singer.StateMessage):
-        pass
-
-    def process_line(self, line: str):
-        """
-        Process a single line from the Singer tap stream.
-
-        Parses the JSON message and routes it to the appropriate handler
-        based on message type (SCHEMA, RECORD, or STATE).
-
-        Args:
-            line: Raw JSON line from Singer tap
-        """
-        try:
-            message = singer.parse_message(line)
-        except json.decoder.JSONDecodeError:
-            logger.error(f"Failed to parse JSON message: {line.strip()}")
-            raise
-
-        if isinstance(message, singer.RecordMessage):
-            self.handle_record_message(message)
-
-        elif isinstance(message, singer.SchemaMessage):
-            self.handle_schema_message(message)
-
-        elif isinstance(message, singer.StateMessage):
-            self.handle_state_message(message)
-
-        else:
-            raise Exception("Unrecognized message {}".format(message))
-
-    def process(self, tap_stream: io.TextIOWrapper):
-        """
-        Process the complete Singer tap stream.
-
-        Reads lines from the tap stream, processes each message,
-        and returns the generated parquet files when complete.
-
-        Args:
-            tap_stream: Text stream containing Singer messages
-
-        Returns:
-            Dictionary mapping stream names to parquet file paths
-        """
-        for line in tap_stream:
-            self.process_line(line)
-
-        return self.on_complete(), self.key_properties
-
-    def on_complete(self):
-        """
-        Complete processing and finalize all parquet files.
-
-        Flushes any remaining buffered rows to disk, closes all parquet writers,
-        and returns the mapping of stream names to their parquet file paths.
-
-        Returns:
-            Dictionary mapping stream names to absolute parquet file paths
-        """
-
-        if self.total_cached_rows > 0:
-            self._flush_all_streams()
-
-        self._close_parquet_writers()
-
-        logger.info("Completed processing and wrote all parquet files")
-
-        return self.parquet_files

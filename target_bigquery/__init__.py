@@ -147,13 +147,12 @@ def main():
 
     try:
         with SingerProcessor(config, tables_config) as processor:
-            parquet_files, key_properties = processor.process(tap_stream)
+            processor.process(tap_stream)
 
         BigQueryLoader(
             config,
             tables_config,
-            parquet_files,
-            key_properties,
+            processor
         ).load()
 
         emit_state(state)

@@ -1,12 +1,13 @@
 import singer
 
-from typing import Dict, List
+from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
 
 from google.cloud import bigquery
 from google.cloud import storage
 from google.cloud.bigquery import LoadJobConfig, WriteDisposition, SourceFormat
 from google.oauth2 import service_account
+from google.cloud.exceptions import NotFound
 
 from target_bigquery.config import (
     TablesConfig,
@@ -14,6 +15,7 @@ from target_bigquery.config import (
     TableConfig,
     ReplicationMethod,
 )
+from target_bigquery.process import ProcessResult
 
 logger = singer.get_logger()
 
@@ -31,22 +33,19 @@ class BigQueryLoader:
         self,
         target_config: TargetConfig,
         tables_config: TablesConfig,
-        parquet_files: Dict[str, str],
-        key_properties: Dict[str, List[str]],
+        process_result: ProcessResult,
     ):
         """
         Initialize the BigQuery loader.
 
         Args:
             target_config: Target configuration settings
-            parquet_files: Dictionary mapping stream names to parquet file paths
             tables_config: Table-specific configuration settings
-            key_properties: Dictionary mapping stream names to key properties
+            process_result: Result object from the SingerProcessor.process() method
         """
         self.target_config = target_config
         self.tables_config = tables_config
-        self.parquet_files = parquet_files
-        self.key_properties = key_properties
+        self.process_result = process_result
         self.uploaded_blob_uris: Dict[str, str] = {}
 
         # Load BigQuery credentials
@@ -109,6 +108,7 @@ class BigQueryLoader:
             source_uri = f"gs://{self.target_config.google_storage_bucket}/{blob_name}"
             logger.info(f"Successfully uploaded {stream_name} to GCS: {source_uri}")
 
+            self._create_missing_columns(stream_name)
             self._create_bigquery_load_job(stream_name, source_uri)
 
             return stream_name, source_uri
@@ -116,7 +116,7 @@ class BigQueryLoader:
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [
                 executor.submit(upload_and_load, stream_name, parquet_file)
-                for stream_name, parquet_file in self.parquet_files.items()
+                for stream_name, parquet_file in self.process_result.parquet_files.items()
             ]
 
             failed_operations = []
@@ -132,6 +132,30 @@ class BigQueryLoader:
                 raise Exception(
                     f"Failed {len(failed_operations)} upload/load operations: {'; '.join(failed_operations)}"
                 )
+
+    def _create_missing_columns(self, stream):
+        table_id = f"{self.target_config.project_id}.{self.target_config.dataset_id}.{self.process_result.table_names[stream]}"
+
+        try:
+            table = self.bq_client.get_table(table_id)
+        except NotFound:
+            return None
+
+        original_schema = table.schema
+        new_schema = original_schema[:]
+
+        new_columns = []
+        for column in self.process_result.big_query_schemas[stream]:
+            if column.name not in [n.name for n in new_schema]:
+                new_columns.append(column.name)
+                logger.info(f"Column {column.name} missing in table {self.process_result.table_names[stream]}, creating it...")
+                new_schema.append(column)
+        if new_columns:
+            table.schema = new_schema
+            try:
+                table = self.bq_client.update_table(table, ["schema"])
+            except:
+                logger.info(f"Error creating column in {self.process_result.table_names[stream]}")
 
     def _create_bigquery_load_job(self, stream_name: str, source_uri: str):
         """Create and execute a BigQuery load job for a single stream.
@@ -187,7 +211,7 @@ class BigQueryLoader:
         ):
             return ReplicationMethod.TRUNCATE
         elif self.target_config.replication_method == ReplicationMethod.INCREMENTAL:
-            if self.key_properties[stream_name]:
+            if self.process_result.key_properties[stream_name]:
                 return ReplicationMethod.INCREMENTAL
             else:
                 # If the stream has no key properties, we can't use incremental replication method, so we fallback to truncate.
