@@ -96,7 +96,7 @@ class BigQueryLoader:
             )
 
             # Upload to GCS with optional key prefix
-            blob_name = f"{stream_name}.parquet"
+            blob_name = f"{self.process_result.table_names[stream_name]}.parquet"
             if self.target_config.gcs_key_prefix:
                 # Ensure prefix doesn't start with / and ends properly
                 prefix = self.target_config.gcs_key_prefix.strip("/")
@@ -186,14 +186,14 @@ class BigQueryLoader:
                 type_=bigquery.table.TimePartitioningType.DAY, field=partition_field
             )
 
-        table_id = f"{self.target_config.project_id}.{self.target_config.dataset_id}.{stream_name}"
+        table_id = f"{self.target_config.project_id}.{self.target_config.dataset_id}.{self.process_result.table_names[stream_name]}"
 
         try:
             load_job = self.bq_client.load_table_from_uri(
                 source_uri, table_id, job_config=job_config
             )
         except Exception as e:
-            logger.error(f"Error creating BigQuery load job for {stream_name}: {e}")
+            logger.error(f"Error creating BigQuery load job for {self.process_result.table_names[stream_name]}: {e}")
             raise
 
         load_job.result()

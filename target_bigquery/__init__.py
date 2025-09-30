@@ -147,12 +147,12 @@ def main():
 
     try:
         with SingerProcessor(config, tables_config) as processor:
-            processor.process(tap_stream)
+            process_result = processor.process(tap_stream)
 
         BigQueryLoader(
             config,
             tables_config,
-            processor
+            process_result
         ).load()
 
         emit_state(state)
