@@ -45,6 +45,7 @@ class TargetConfig(BaseModel):
     # Required fields
     project_id: str
     dataset_id: str
+    google_storage_bucket: str
 
     # Fields with defaults
     location: str = "US"
@@ -57,7 +58,14 @@ class TargetConfig(BaseModel):
     force_alphanumeric_table_names: bool = False
     merge_state_messages: bool = True
     table_config: Optional[str] = None
-    google_storage_bucket: Optional[str] = "target-bigquery-testing"
+
+    # Credential paths for cross-account access
+    storage_project_id: Optional[str] = None
+    bigquery_credentials_path: Optional[str] = None
+    storage_credentials_path: Optional[str] = None
+
+    # GCS file path prefix
+    gcs_key_prefix: Optional[str] = None
 
     @model_validator(mode="after")
     def determine_replication_method(self):

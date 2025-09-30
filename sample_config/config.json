@@ -1,6 +1,7 @@
 {
   "project_id": "{Your GCP project ID}",
   "dataset_id": "{dataset ID}",
+  "google_storage_bucket": "{Your GCS bucket name}",
   "location": "US",
   "replication_method": "append",
   "truncate_on_full_sync": false,
@@ -10,6 +11,10 @@
   "add_metadata_columns": true,
   "force_alphanumeric_table_names": false,
   "merge_state_messages": true,
-  "table_config": null
+  "table_config": null,
+  "gcs_key_prefix": null,
+  "storage_project_id": null,
+  "bigquery_credentials_path": null,
+  "storage_credentials_path": null
 }
 

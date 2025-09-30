@@ -120,6 +120,7 @@ sample [target-config.json](/sample_config/config.json) file (or see the example
 #### Required Parameters
 - **`project_id`** (string): Your Google Cloud Platform project ID
 - **`dataset_id`** (string): BigQuery dataset name where tables will be created
+- **`google_storage_bucket`** (string): GCS bucket name for staging parquet files
 
 #### Optional Parameters
 
@@ -139,6 +140,15 @@ sample [target-config.json](/sample_config/config.json) file (or see the example
 **Data Processing:**
 - **`validate_records`** (boolean, default: `true`): Validate incoming records against schema
 - **`add_metadata_columns`** (boolean, default: `true`): Add Singer metadata columns (`_sdc_batched_at`, `_sdc_deleted_at`, etc.)
+
+**Google Cloud Storage:**
+- **`google_storage_bucket`** (string, default: `"target-bigquery-testing"`): GCS bucket name for staging parquet files
+- **`gcs_key_prefix`** (string, optional): Path prefix for uploaded files in GCS (e.g., `"staging/data"` uploads to `gs://bucket/staging/data/stream.parquet`)
+
+**Cross-Account Authentication:**
+- **`storage_project_id`** (string, optional): GCP project ID for Cloud Storage bucket (defaults to `project_id` if not specified)
+- **`bigquery_credentials_path`** (string, optional): Path to service account JSON file for BigQuery authentication (overrides `GOOGLE_APPLICATION_CREDENTIALS`)
+- **`storage_credentials_path`** (string, optional): Path to service account JSON file for Cloud Storage authentication (overrides `GOOGLE_APPLICATION_CREDENTIALS`)
 
 **Table Configuration:**
 - **`table_config`** (string): Path to table-specific configuration file (alternative to `--tables` CLI flag)
@@ -166,9 +176,34 @@ sample [target-config.json](/sample_config/config.json) file (or see the example
 ```json
 {
     "project_id": "my-project",
-    "dataset_id": "my_dataset"
+    "dataset_id": "my_dataset",
+    "google_storage_bucket": "my-bucket"
 }
 ```
+
+#### Cross-Account Configuration (Production):
+
+When BigQuery and Cloud Storage are in separate GCP projects/accounts:
+
+```json
+{
+    "project_id": "bigquery-project-123",
+    "dataset_id": "my_dataset",
+    "location": "US",
+    "google_storage_bucket": "my-staging-bucket",
+    "gcs_key_prefix": "singer-target/staging",
+    "storage_project_id": "storage-project-456",
+    "bigquery_credentials_path": "/path/to/bigquery-service-account.json",
+    "storage_credentials_path": "/path/to/storage-service-account.json"
+}
+```
+
+**Notes:**
+- If `storage_project_id` is not specified, it defaults to `project_id`
+- If credential paths are not specified, the target falls back to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+- Both BigQuery and Storage service accounts need appropriate permissions:
+  - BigQuery service account: `BigQuery Data Editor` and `BigQuery Job User` roles
+  - Storage service account: `Storage Object Admin` role on the bucket
 
 ⚠️ **WARNING**: We do not recommend using `incremental` replication method (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data.
 

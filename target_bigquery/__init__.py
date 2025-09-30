@@ -15,6 +15,7 @@ from target_bigquery.biquery_loader import BigQueryLoader
 
 from google.api_core import exceptions
 from google.cloud import bigquery
+from google.oauth2 import service_account
 
 logger = singer.get_logger()
 
@@ -69,7 +70,7 @@ def emit_state(state):
                 f.write("{}\n".format(line))
 
 
-def ensure_dataset(project_id, dataset_id, location):
+def ensure_dataset(project_id, dataset_id, location, credentials=None):
     """
     Ensure BigQuery dataset exists, creating it if necessary.
 
@@ -82,11 +83,12 @@ def ensure_dataset(project_id, dataset_id, location):
         project_id: Google Cloud project ID
         dataset_id: BigQuery dataset ID to create/verify
         location: Geographic location for the dataset (e.g., 'US')
+        credentials: Optional credentials object to use for authentication
 
     Returns:
         Tuple of (BigQuery client, Dataset reference)
     """
-    client = bigquery.Client(project=project_id, location=location)
+    client = bigquery.Client(project=project_id, location=location, credentials=credentials)
 
     dataset_ref = bigquery.DatasetReference(project_id, dataset_id)
     try:
@@ -134,7 +136,14 @@ def main():
 
     tap_stream = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
 
-    ensure_dataset(config.project_id, config.dataset_id, config.location)
+    # Load BigQuery credentials if specified
+    bq_credentials = None
+    if config.bigquery_credentials_path:
+        bq_credentials = service_account.Credentials.from_service_account_file(
+            config.bigquery_credentials_path
+        )
+
+    ensure_dataset(config.project_id, config.dataset_id, config.location, bq_credentials)
 
     try:
         with SingerProcessor(config, tables_config) as processor:

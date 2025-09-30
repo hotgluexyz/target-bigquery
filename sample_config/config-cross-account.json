@@ -1,0 +1,19 @@
+{
+  "project_id": "bigquery-project-123",
+  "dataset_id": "my_dataset",
+  "location": "US",
+  "replication_method": "append",
+  "truncate_on_full_sync": false,
+  "table_prefix": "",
+  "table_suffix": "",
+  "validate_records": true,
+  "add_metadata_columns": true,
+  "force_alphanumeric_table_names": false,
+  "merge_state_messages": true,
+  "table_config": null,
+  "google_storage_bucket": "my-staging-bucket",
+  "gcs_key_prefix": "singer-target/staging",
+  "storage_project_id": "storage-project-456",
+  "bigquery_credentials_path": "/path/to/bigquery-service-account.json",
+  "storage_credentials_path": "/path/to/storage-service-account.json"
+}

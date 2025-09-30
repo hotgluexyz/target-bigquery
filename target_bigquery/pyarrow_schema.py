@@ -19,7 +19,7 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
         return None
 
     try:
-        # Handle empty strings for non-string types (key insight from target-parquet)
+        # Handle empty strings for non-string types
         if (
             isinstance(value, str)
             and value.strip() == ""
@@ -27,7 +27,7 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
         ):
             return None
 
-        # Handle timestamp conversion using more robust dateutil parser
+        # Handle timestamp conversion
         if pa.types.is_timestamp(expected_type):
             if isinstance(value, str):
                 if value.lower() == "null":
@@ -36,7 +36,7 @@ def convert_value_to_pyarrow_type(value: Any, expected_type: pa.DataType) -> Any
                     # Try fast ISO format parsing first (handles most cases)
                     return datetime.fromisoformat(value.replace("Z", "+00:00"))
                 except ValueError:
-                    # Fallback to slower but more flexible dateutil parser
+                    # Fallback to slower but more flexible dateutil parser from legacy implementation
                     try:
                         return dateutil_parser.parse(value)
                     except (ValueError, TypeError) as e:

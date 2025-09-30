@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from google.cloud import bigquery
 from google.cloud import storage
 from google.cloud.bigquery import LoadJobConfig, WriteDisposition, SourceFormat
+from google.oauth2 import service_account
 
 from target_bigquery.config import (
     TablesConfig,
@@ -47,10 +48,42 @@ class BigQueryLoader:
         self.parquet_files = parquet_files
         self.key_properties = key_properties
         self.uploaded_blob_uris: Dict[str, str] = {}
+
+        # Load BigQuery credentials
+        bq_credentials = None
+        if target_config.bigquery_credentials_path:
+            bq_credentials = service_account.Credentials.from_service_account_file(
+                target_config.bigquery_credentials_path
+            )
+            logger.info(
+                f"Using BigQuery credentials from: {target_config.bigquery_credentials_path}"
+            )
+
+        # Load Storage credentials
+        storage_credentials = None
+        if target_config.storage_credentials_path:
+            storage_credentials = service_account.Credentials.from_service_account_file(
+                target_config.storage_credentials_path
+            )
+            logger.info(
+                f"Using Storage credentials from: {target_config.storage_credentials_path}"
+            )
+
+        # Initialize BigQuery client
         self.bq_client = bigquery.Client(
-            project=self.target_config.project_id, location=self.target_config.location
+            project=self.target_config.project_id,
+            location=self.target_config.location,
+            credentials=bq_credentials,
         )
-        self.storage_client = storage.Client(project=self.target_config.project_id)
+
+        # Initialize Storage client (may use different project)
+        storage_project = (
+            target_config.storage_project_id or target_config.project_id
+        )
+        self.storage_client = storage.Client(
+            project=storage_project,
+            credentials=storage_credentials,
+        )
 
     def load(self):
         """Execute the complete load process: upload to GCS and immediately start BigQuery load jobs."""
@@ -63,15 +96,19 @@ class BigQueryLoader:
                 f"Uploading {stream_name} parquet data to Google Cloud Storage: {parquet_file}"
             )
 
-            # Upload to GCS
+            # Upload to GCS with optional key prefix
             blob_name = f"{stream_name}.parquet"
+            if self.target_config.gcs_key_prefix:
+                # Ensure prefix doesn't start with / and ends properly
+                prefix = self.target_config.gcs_key_prefix.strip("/")
+                blob_name = f"{prefix}/{blob_name}"
+
             blob = bucket.blob(blob_name)
             blob.upload_from_filename(parquet_file)
 
             source_uri = f"gs://{self.target_config.google_storage_bucket}/{blob_name}"
             logger.info(f"Successfully uploaded {stream_name} to GCS: {source_uri}")
 
-            # Immediately start BigQuery load job
             self._create_bigquery_load_job(stream_name, source_uri)
 
             return stream_name, source_uri
