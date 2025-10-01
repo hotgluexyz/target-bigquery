@@ -13,7 +13,7 @@
             "cwd": "${workspaceFolder}/.secrets",
             "args": [
                 "<",
-                "./etl-output/data.singer",
+                "./etl-output/data3.singer",
                 "--config",
                 "config.json",
                 "--tables",
