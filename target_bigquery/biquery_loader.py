@@ -108,10 +108,17 @@ class BigQueryLoader:
             source_uri = f"gs://{self.target_config.google_storage_bucket}/{blob_name}"
             logger.info(f"Successfully uploaded {stream_name} to GCS: {source_uri}")
 
-            self._create_missing_columns(stream_name)
-            self._create_bigquery_load_job(stream_name, source_uri)
-
-            return stream_name, source_uri
+            try:
+                self._create_missing_columns(stream_name)
+                self._create_bigquery_load_job(stream_name, source_uri)
+                return stream_name, source_uri
+            finally:
+                # Clean up GCS file after load completes (success or failure)
+                try:
+                    blob.delete()
+                    logger.info(f"Successfully deleted GCS file: {source_uri}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete GCS file {source_uri}: {e}")
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [
