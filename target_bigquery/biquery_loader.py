@@ -1,4 +1,5 @@
 import singer
+import os
 
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
@@ -119,6 +120,14 @@ class BigQueryLoader:
                     logger.info(f"Successfully deleted GCS file: {source_uri}")
                 except Exception as e:
                     logger.warning(f"Failed to delete GCS file {source_uri}: {e}")
+
+                # Clean up local parquet file
+                try:
+                    if os.path.exists(parquet_file):
+                        os.remove(parquet_file)
+                        logger.info(f"Successfully deleted local parquet file: {parquet_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete local parquet file {parquet_file}: {e}")
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [
