@@ -5,7 +5,8 @@ import io
 import singer
 import pyarrow as pa
 import pyarrow.parquet as pq
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
+from target_bigquery.state import State, LiteralState
 from datetime import datetime
 
 from target_bigquery.config import TargetConfig, TablesConfig, TableConfig
@@ -46,12 +47,14 @@ class ProcessResult:
         parquet_files: Dict[str, str],
         key_properties: Dict[str, List[str]],
         table_names: Dict[str, str],
-        big_query_schemas: Dict[str, List[SchemaField]]
+        big_query_schemas: Dict[str, List[SchemaField]],
+        state: Any
     ):
         self.parquet_files = parquet_files
         self.key_properties = key_properties
         self.table_names = table_names
         self.big_query_schemas = big_query_schemas
+        self.state = state
 
 
 class SingerProcessor:
@@ -66,7 +69,7 @@ class SingerProcessor:
     4. Stream management and resource cleanup
     """
 
-    def __init__(self, target_config: TargetConfig, tables_config: TablesConfig):
+    def __init__(self, target_config: TargetConfig, tables_config: TablesConfig, state_handler: Union[State, LiteralState]):
         """
         Initialize the Singer message processor.
 
@@ -76,6 +79,7 @@ class SingerProcessor:
         """
         self.target_config = target_config
         self.tables_config = tables_config
+        self.state_handler = state_handler
 
         # Stream metadata
         self.table_names: Dict[str, str] = {}
@@ -175,6 +179,7 @@ class SingerProcessor:
             key_properties=self.key_properties,
             table_names=self.table_names,
             big_query_schemas=self.big_query_schemas,
+            state=self.state_handler,
         )
 
     def _handle_schema_message(self, message: singer.SchemaMessage):
@@ -267,7 +272,7 @@ class SingerProcessor:
             self._flush_all_streams()
 
     def _handle_state_message(self, message: singer.StateMessage):
-        pass
+        self.state_handler.merge(message.value)
 
     def _cleanup_record(self, schema, record):
         """

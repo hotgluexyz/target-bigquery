@@ -13,11 +13,13 @@
             "cwd": "${workspaceFolder}/.secrets",
             "args": [
                 "<",
-                "./etl-output/data3.singer",
+                "./etl-output/data.singer",
                 "--config",
                 "config.json",
                 "--tables",
                 "target-tables-config.json",
+                "--state",
+                "target-state-init.json",
                 ">",
                 "target-state.json"
             ],

@@ -120,7 +120,6 @@ def main():
     # Process target config file
     config_dict = load_json_file(flags.config, "config")
     config = TargetConfig(**config_dict)
-    state_handler = State if config.merge_state_messages else LiteralState
 
     # Process target tables config file
     table_config_path = flags.tables or config.table_config
@@ -130,9 +129,12 @@ def main():
         tables_config = TablesConfig(**tables_config_dict)
 
     # Load initial state
-    state = None
+    initial_state = {}
     if flags.state is not None:
-        state = load_json_file(flags.state, "state")
+        initial_state = load_json_file(flags.state, "state")
+
+    state_cls = State if config.merge_state_messages else LiteralState
+    state = state_cls(**initial_state)
 
     tap_stream = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
 
@@ -146,7 +148,7 @@ def main():
     ensure_dataset(config.project_id, config.dataset_id, config.location, bq_credentials)
 
     try:
-        with SingerProcessor(config, tables_config) as processor:
+        with SingerProcessor(config, tables_config, state) as processor:
             process_result = processor.process(tap_stream)
 
         BigQueryLoader(
