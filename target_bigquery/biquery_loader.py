@@ -183,6 +183,7 @@ class BigQueryLoader:
             source_format=SourceFormat.PARQUET,
             write_disposition=self._get_write_disposition(replication_method),
             allow_quoted_newlines=True,
+            max_bad_records=0,
         )
 
         if cluster_fields:

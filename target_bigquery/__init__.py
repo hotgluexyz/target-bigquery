@@ -158,7 +158,6 @@ def main():
         emit_state(state)
 
     except Exception as e:
-        # load errors surface here
         exc_type, exc_value, exc_traceback = sys.exc_info()
         logger.critical(
             repr(traceback.format_exception(exc_type, exc_value, exc_traceback))
