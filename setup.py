@@ -19,3 +19,4 @@ setup(
         target-bigquery=target_bigquery:main
       """,
 )
+
