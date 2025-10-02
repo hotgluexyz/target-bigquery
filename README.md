@@ -167,8 +167,7 @@ sample [target-config.json](/sample_config/config.json) file (or see the example
     "add_metadata_columns": true,
     "force_alphanumeric_table_names": false,
     "merge_state_messages": true,
-    "table_config": "target-tables-config.json",
-    "max_cache": 100
+    "table_config": "target-tables-config.json"
 }
 ```
 
