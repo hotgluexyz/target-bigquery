@@ -29,7 +29,7 @@ import fastjsonschema
 
 logger = singer.get_logger()
 
-STREAM_ROW_CACHE_SIZE = 75000
+STREAM_ROW_CACHE_SIZE = 20000
 
 
 class ProcessResult:
