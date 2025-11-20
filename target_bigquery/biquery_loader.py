@@ -309,7 +309,8 @@ class BigQueryLoader:
 
     def _get_table_replication_method(self, stream_name: str) -> ReplicationMethod:
         if (
-            self.tables_config.streams.get(
+            self.target_config.replication_method == ReplicationMethod.TRUNCATE
+            or self.tables_config.streams.get(
                 stream_name, TableConfig()
             ).replication_method
             == "truncate"
