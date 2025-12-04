@@ -2,6 +2,7 @@
 the purpose of this module is to convert JSON schema to BigQuery schema.
 """
 import re
+import regex
 
 from target_bigquery.simplify_json_schema import BQ_DECIMAL_SCALE_MAX, BQ_BIGDECIMAL_SCALE_MAX, \
     BQ_DECIMAL_MAX_PRECISION_INCREMENT, BQ_BIGDECIMAL_MAX_PRECISION_INCREMENT
@@ -101,10 +102,12 @@ def create_valid_bigquery_table_name(table_name: str) -> str:
         str: A sanitized, BigQuery-compliant table name.
     """
     # negative regex pattern of the allowed BQ Table Name characters
-    regex_pattern = r"[^LMNPcPdZs\w\s-]"
+    regex_pattern = r"[^\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Zs}\w\s-]"
 
     # replace invalid characters with an underscore
-    table_name = re.sub(regex_pattern, "_", table_name)
+    # uses the `regex` lib because the standard `re` lib
+    # does not support Unicode characters categories
+    table_name = regex.sub(regex_pattern, "_", table_name)
 
     # Truncate to 300 characters if necessary
     table_name = table_name[:1024]
