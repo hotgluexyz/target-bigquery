@@ -288,7 +288,10 @@ class LoadJobProcessHandler(BaseProcessHandler):
         loaded_tmp_tables = []
         try:
             for stream in rows.keys():
-                tmp_table_name = "t_{}_{}".format(self.tables[stream], str(uuid.uuid4()).replace("-", ""))
+                # truncate the table name to 989 characters because BQ has table name
+                # limit of 1024 characters.
+                # So it's 989 + 3 (for the prefix) + 32 (for the random uuid) = 1024 max characters.
+                tmp_table_name = "t_{}_{}".format(self.tables[stream][:989], str(uuid.uuid4()).replace("-", ""))
 
                 job = self._load_to_bq(
                     client=self.client,
