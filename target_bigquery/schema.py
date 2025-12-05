@@ -109,7 +109,7 @@ def create_valid_bigquery_table_name(table_name: str) -> str:
     # does not support Unicode characters categories
     table_name = regex.sub(regex_pattern, "_", table_name)
 
-    # Truncate to 300 characters if necessary
+    # Truncate to 1024 characters if necessary
     table_name = table_name[:1024]
 
     return table_name
