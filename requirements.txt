@@ -6,3 +6,4 @@ backoff==1.8.0
 pydantic==2.11.9
 pyarrow==21.0.0
 fastjsonschema==2.21.2
+regex==2024.4.16
