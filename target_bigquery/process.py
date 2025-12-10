@@ -5,6 +5,7 @@ import io
 import singer
 import pyarrow as pa
 import pyarrow.parquet as pq
+from hashlib import sha256
 from typing import Any, Dict, List, Union
 from target_bigquery.state import State, LiteralState
 from datetime import datetime
@@ -13,6 +14,7 @@ from target_bigquery.config import TargetConfig, TablesConfig, TableConfig
 from target_bigquery.bigquery_schema import (
     build_schema,
     create_valid_bigquery_name,
+    create_valid_bigquery_table_name,
 )
 from target_bigquery.pyarrow_schema import (
     convert_and_filter_record_to_pyarrow,
@@ -317,6 +319,7 @@ class SingerProcessor:
         self, stream_name: str, prefix: str, suffix: str, force_alphanumeric_table_names: bool
     ):
         table_name = "{}{}{}".format(prefix, stream_name, suffix)
+        table_name = create_valid_bigquery_table_name(table_name)
         if force_alphanumeric_table_names:
             return create_valid_bigquery_name(table_name)
         else:
@@ -359,7 +362,8 @@ class SingerProcessor:
         """
         if stream_name not in self.parquet_writers:
             # Create parquet file path
-            parquet_file = f"{stream_name}.parquet"
+            file_name_hash = sha256(stream_name.encode('utf-8')).hexdigest()
+            parquet_file = f"{file_name_hash}.parquet"
             parquet_file_path = os.path.abspath(parquet_file)
             self.parquet_files[stream_name] = parquet_file_path
 

@@ -3,6 +3,7 @@ the purpose of this module is to convert JSON schema to BigQuery schema.
 """
 
 import re
+import regex
 from functools import lru_cache
 
 from target_bigquery.simplify_json_schema import (
@@ -73,6 +74,34 @@ def create_valid_bigquery_name(column_name: str) -> str:
             column_name = "_" + column_name
 
     return column_name
+
+
+def create_valid_bigquery_table_name(table_name: str) -> str:
+    """
+    Transforms a given table name into a BigQuery-compliant table name.
+    BigQuery table naming rules:
+    - https://docs.cloud.google.com/bigquery/docs/tables#table_naming
+    - Contain characters with a total of up to 1,024 UTF-8 bytes.
+    - Contain Unicode characters in category L (letter), M (mark), N (number),
+        Pc (connector, including underscore), Pd (dash), Zs (space).
+    - Any characters that are not in the list above will be replaced with an underscore.
+    Args:
+        table_name (str): The original table name.
+    Returns:
+        str: A sanitized, BigQuery-compliant table name.
+    """
+    # negative regex pattern of the allowed BQ Table Name characters
+    regex_pattern = r"[^\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Zs}\w\s-]"
+
+    # replace invalid characters with an underscore
+    # uses the `regex` lib because the standard `re` lib
+    # does not support Unicode characters categories
+    table_name = regex.sub(regex_pattern, "_", table_name)
+
+    # Truncate to 1024 characters if necessary
+    table_name = table_name[:1024]
+
+    return table_name
 
 
 def prioritize_one_data_type_from_multiple_ones_in_any_of(field_property):
