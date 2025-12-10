@@ -13,6 +13,7 @@ from target_bigquery.config import TargetConfig, TablesConfig, TableConfig
 from target_bigquery.bigquery_schema import (
     build_schema,
     create_valid_bigquery_name,
+    create_valid_bigquery_table_name,
 )
 from target_bigquery.pyarrow_schema import (
     convert_and_filter_record_to_pyarrow,
@@ -317,6 +318,7 @@ class SingerProcessor:
         self, stream_name: str, prefix: str, suffix: str, force_alphanumeric_table_names: bool
     ):
         table_name = "{}{}{}".format(prefix, stream_name, suffix)
+        table_name = create_valid_bigquery_table_name(table_name)
         if force_alphanumeric_table_names:
             return create_valid_bigquery_name(table_name)
         else:
