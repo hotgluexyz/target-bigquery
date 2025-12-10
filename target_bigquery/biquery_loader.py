@@ -99,7 +99,7 @@ class BigQueryLoader:
             )
 
             # Upload to GCS with optional key prefix
-            blob_name = f"{self.process_result.table_names[stream_name]}.parquet"
+            blob_name = f"{os.path.basename(self.process_result.parquet_files[stream_name])}"
             if self.target_config.gcs_key_prefix:
                 # Ensure prefix doesn't start with / and ends properly
                 prefix = self.target_config.gcs_key_prefix.strip("/")

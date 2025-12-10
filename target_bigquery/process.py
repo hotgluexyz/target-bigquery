@@ -5,6 +5,7 @@ import io
 import singer
 import pyarrow as pa
 import pyarrow.parquet as pq
+from hashlib import sha256
 from typing import Any, Dict, List, Union
 from target_bigquery.state import State, LiteralState
 from datetime import datetime
@@ -361,7 +362,8 @@ class SingerProcessor:
         """
         if stream_name not in self.parquet_writers:
             # Create parquet file path
-            parquet_file = f"{stream_name}.parquet"
+            file_name_hash = sha256(stream_name.encode('utf-8')).hexdigest()
+            parquet_file = f"{file_name_hash}.parquet"
             parquet_file_path = os.path.abspath(parquet_file)
             self.parquet_files[stream_name] = parquet_file_path
 
