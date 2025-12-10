@@ -4,6 +4,7 @@ build/
 .idea/*
 .pytest_cache/*
 .spyproject/*
+.venv/
 venv/*
 __pycache__
 target_bigquery.egg-info
