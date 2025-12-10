@@ -1,0 +1,29 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "target-bigquery",
+            "type": "debugpy",
+            "request": "launch",
+            "justMyCode": false,
+            "program": "../target_bigquery/__init__.py",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "<",
+                "./etl-output/data3.singer",
+                "--config",
+                "config.json",
+                "--tables",
+                "target-tables-config.json",
+                "--state",
+                "target-state-init.json",
+                ">",
+                "target-state.json"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}

@@ -1,6 +1,6 @@
 import re
 import singer
-from target_bigquery.schema import create_valid_bigquery_name
+from target_bigquery.bigquery_schema import create_valid_bigquery_name
 
 LOGGER = singer.get_logger()
 
@@ -38,31 +38,40 @@ def validate_json_schema_completeness(schema_input):
     schema_input_as_string = str(schema_input)
 
     # strip spaces from schema file (which is treated as text)
-    schema_input_no_spaces = re.sub(' |\n', '', schema_input_as_string)
+    schema_input_no_spaces = re.sub(" |\n", "", schema_input_as_string)
 
     # regex match for patterns of incomplete schema
     # the purpose of the dictionary below is to create a more user-friendly error message and point the end user to the
     # correponding part of their schema (props, type, items or elsewhere)
-    completeness_validation_dict_exception = {"properties": re.compile(r'\"properties\"\:\{\}'),
-                                              "type": re.compile(r'\"type\"\:\[\]'),
-                                              "items": re.compile(r'\"items\"\:\{\}')
-                                              }
-
-    completeness_validation_dict_warning = {
-        "object/dictionary": re.compile(r'\{\}')
+    completeness_validation_dict_exception = {
+        "properties": re.compile(r"\"properties\"\:\{\}"),
+        "type": re.compile(r"\"type\"\:\[\]"),
+        "items": re.compile(r"\"items\"\:\{\}"),
     }
 
+    completeness_validation_dict_warning = {"object/dictionary": re.compile(r"\{\}")}
+
     # raise exception
-    for schema_element, pattern_not_valid in completeness_validation_dict_exception.items():
+    for (
+        schema_element,
+        pattern_not_valid,
+    ) in completeness_validation_dict_exception.items():
 
         if pattern_not_valid.search(schema_input_no_spaces):
-            raise ValueError(f"JSON schema is invalid/incomplete. It has empty {schema_element}")
+            raise ValueError(
+                f"JSON schema is invalid/incomplete. It has empty {schema_element}"
+            )
 
     # give warning
-    for schema_element, pattern_not_valid in completeness_validation_dict_warning.items():
+    for (
+        schema_element,
+        pattern_not_valid,
+    ) in completeness_validation_dict_warning.items():
 
         if pattern_not_valid.search(schema_input_no_spaces):
-            LOGGER.warning(f"the pipeline might fail because of undefined fields: an empty {schema_element} indicated as {{}}")
+            LOGGER.warning(
+                f"the pipeline might fail because of undefined fields: an empty {schema_element} indicated as {{}}"
+            )
 
 
 def check_schema_for_dupes_in_field_names(stream_name, schema):
@@ -77,6 +86,7 @@ def check_schema_for_dupes_in_field_names(stream_name, schema):
     :param schema: JSON schema of the stream
     :return:
     """
+
     def build_field_list(schema):
         """
 
@@ -104,17 +114,21 @@ def check_schema_for_dupes_in_field_names(stream_name, schema):
 
         """
         f_dict = {}
-        for field_name, field_property in schema.get("properties", schema.get("items", {}).get("properties", {})).items():
-            if not ("items" in field_property and "properties" in field_property["items"]) \
-                    and not ("properties" in field_property):
+        for field_name, field_property in schema.get(
+            "properties", schema.get("items", {}).get("properties", {})
+        ).items():
+            if not (
+                "items" in field_property and "properties" in field_property["items"]
+            ) and not ("properties" in field_property):
                 key = create_valid_bigquery_name(field_name.upper())
                 if not f_dict.get(key):
                     f_dict[key] = [field_name]
                 else:
                     f_dict[key].append(field_name)
 
-            elif ("items" in field_property and "properties" in field_property["items"]) \
-                    or ("properties" in field_property):
+            elif (
+                "items" in field_property and "properties" in field_property["items"]
+            ) or ("properties" in field_property):
                 nd = build_field_list(field_property)
                 key = create_valid_bigquery_name(field_name.upper())
                 for k, v in nd.items():
@@ -128,19 +142,10 @@ def check_schema_for_dupes_in_field_names(stream_name, schema):
     fields = build_field_list(schema)
     dupes = {k: v for k, v in fields.items() if len(v) > 1}
     if dupes:
-        errs = "; ".join([f"{' & '.join(v)} are read as {str(k)} by BigQuery" for k, v in dupes.items()])
+        errs = "; ".join(
+            [
+                f"{' & '.join(v)} are read as {str(k)} by BigQuery"
+                for k, v in dupes.items()
+            ]
+        )
         raise ValueError(f"Duplicate field(s) in stream {stream_name}: {errs}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-

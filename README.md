@@ -2,34 +2,17 @@
 
 A [Singer](https://singer.io) target that writes data to Google BigQuery.
 
-[![Lint](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml/badge.svg)](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml)
+[![Python package](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml/badge.svg)](https://github.com/adswerve/target-bigquery/actions/workflows/python-package.yml)
 
 `target-bigquery` works together with any other [Singer Tap] to move data from sources like [Braintree], [Freshdesk]
 and [Hubspot] to Google BigQuery.
 
 ## Contents
 
-- [Contact](#contact)
 - [Dependencies](#dependencies)
 - [How to use it](#how-to-use-it)
-    - [Step 1: Enable Google BigQuery API](#step-1-enable-google-bigquery-api)
-    - [Step 2: Authenticate with a service account](#step-2-authenticate-with-a-service-account)
-    - [Step 3: Configure](#step-3-configure)
-        - [Target config file](#target-config-file)
-        - [Tap config files](#tap-config-files)
-    - [Step 4: Install and run](#step-4-install-and-run)
-    - [Step 5: target-tables-config file: set up partitioning and clustering](#step-5-target-tables-config-file-set-up-partitioning-and-clustering)
-        - [Partitioning background](#partitioning-background)
-        - [Clustering background](#clustering-background)
-        - [Setting up partitioning and clustering](#setting-up-partitioning-and-clustering)
-    - [Step 6: target-tables-config file: force data types and modes](#step-6-target-tables-config-file-force-data-types-and-modes)
-- [Unit tests set up](#unit-tests-set-up)
-- [Config files in this project](#config-files-in-this-project)
 - [Note about BigQuery table/columns names](#note-about-bigquery-tablecolumns-names)
 
-## Contact
-
-Email: `analytics-help@adswerve.com`
 
 ## Dependencies
 
@@ -38,7 +21,7 @@ Install requirements, using either of the two methods below.
 **Method 1**
 
 ```
-pip install -r requirements.txt 
+pip install -r requirements.txt
 ```
 
 **Method 2**
@@ -50,7 +33,7 @@ user would. **-e** emulates how a user of the package would install requirements
 pip install -e .
 ```
 
-## How to use it
+## BigQuery Setup
 
 ### Step 1: Enable Google BigQuery API
 
@@ -127,136 +110,146 @@ Create a service account credential:
 - [Creating an environment variable on a Windows 10 machine](https://www.architectryan.com/2018/08/31/how-to-change-environment-variables-on-windows-10/)
 - [Creating an environment variable on a Mac machine](https://medium.com/@himanshuagarwal1395/setting-up-environment-variables-in-macos-sierra-f5978369b255)
 
-### Step 3: Configure
+## Configuration
 
-#### Target config file
+### Target config file (Main Configuration)
 
 Create a file called **target-config.json** in your working directory, following this
-sample [target-config.json](/sample_config/target-config-exchange-rates-api.json) file (or see the example below).
+sample [target-config.json](/sample_config/config.json) file (or see the example below).
 
-- Required parameters are the project name `project_id` and `dataset_id`.
-- Optional parameters are `table_suffix`, `validate records`, `add_metadata_columns`, `location` and `table_config`.
-- Default data location is "US" (if your location is not the US, you can indicate a different location in your **
-  target-config.json** file).
-- The data will be written to the dataset specified in your **target-config.json**.
-- If you do not have the dataset with this name yet, it will be created.
-- The table will be created.
-- There's an optional parameter `replication_method` that can either be:
-    * `append`: Adding new rows to the table (Default value)
-    * `truncate`: Deleting all previous rows and uploading the new ones to the table
-    * `incremental`: **Upserting** new rows into the table, using the **primary key** given by the tap connector
-      (if it finds an old row with same key, updates it. Otherwise it inserts the new row)
- - WARNING: We do not recommend using `incremental` option (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data. 
+#### Required Parameters
+- **`project_id`** (string): Your Google Cloud Platform project ID
+- **`dataset_id`** (string): BigQuery dataset name where tables will be created
+- **`google_storage_bucket`** (string): GCS bucket name for staging parquet files
 
-Sample **target-config.json** file:
+#### Optional Parameters
 
-```
+**BigQuery Configuration:**
+- **`location`** (string, default: `"US"`): BigQuery dataset location (e.g., `"US"`, `"EU"`, `"asia-southeast1"`)
+- **`table_prefix`** (string, default: `""`): Prefix added to all table names
+- **`table_suffix`** (string, default: `""`): Suffix added to all table names
+- **`force_alphanumeric_table_names`** (boolean, default: `false`): Force table names to be alphanumeric only
+
+**Replication Method (Global):**
+- **`replication_method`** (string, default: `"append"`):
+  - `"append"`: Add new rows to existing tables (default)
+  - `"truncate"`: Delete all existing rows and insert new ones
+  - `"incremental"`: Upsert rows using primary keys (⚠️ **Not recommended**)
+- **`truncate_on_full_sync`** (boolean, default: `false`): Force truncate when `SYNC_TYPE=full_sync` environment variable is set
+
+**Data Processing:**
+- **`validate_records`** (boolean, default: `true`): Validate incoming records against schema
+- **`add_metadata_columns`** (boolean, default: `true`): Add Singer metadata columns (`_sdc_batched_at`, `_sdc_deleted_at`, etc.)
+
+**Google Cloud Storage:**
+- **`google_storage_bucket`** (string, default: `"target-bigquery-testing"`): GCS bucket name for staging parquet files
+- **`gcs_key_prefix`** (string, optional): Path prefix for uploaded files in GCS (e.g., `"staging/data"` uploads to `gs://bucket/staging/data/stream.parquet`)
+
+**Cross-Account Authentication:**
+- **`storage_project_id`** (string, optional): GCP project ID for Cloud Storage bucket (defaults to `project_id` if not specified)
+- **`bigquery_credentials_path`** (string, optional): Path to service account JSON file for BigQuery authentication (overrides `GOOGLE_APPLICATION_CREDENTIALS`)
+- **`storage_credentials_path`** (string, optional): Path to service account JSON file for Cloud Storage authentication (overrides `GOOGLE_APPLICATION_CREDENTIALS`)
+
+**Table Configuration:**
+- **`table_config`** (string): Path to table-specific configuration file (alternative to `--tables` CLI flag)
+
+#### Sample target-config.json file:
+
+```json
 {
     "project_id": "{your_GCP_project_id}",
     "dataset_id": "{your_dataset_id}",
-    "table_suffix": "_sample_table_suffix",
+    "location": "EU",
+    "replication_method": "append",
+    "table_prefix": "src_",
+    "table_suffix": "_v1",
     "validate_records": true,
     "add_metadata_columns": true,
-    "location": "EU",
+    "force_alphanumeric_table_names": false,
+    "merge_state_messages": true,
     "table_config": "target-tables-config.json"
 }
 ```
 
-#### Tap config files
-
-This is a little bit outside of the scope of this documentation, but let's quickly take a look at sample *tap* config
-files as well, to see how tap and target work together.
-
-Sample [tap-config.json](/sample_config/tap-config-exchange-rates-api.json) file configures the data source:
-
-```
-{   "base": "USD",
-    "start_date": "2021-01-01"
-}
-```
-
-- Sample [state.json](/sample_config/state.json) file is now just a empty JSON file `{}`, and it will be written or
-  updated when the tap runs.
-- This is an optional file.
-- The tap will write the date into **state.json** file, indicating when the data loading stopped at.
-- Next time you run the tap, it'll continue from this date in the state file. If **state.json** file is provided, then
-  it takes presedence over the "start_date" in the tap config file.
-
-Learn more: https://github.com/singer-io/getting-started
-
-### Step 4: Install and run
-
-1. First, make sure Python 3 is installed on your system or follow these installation instructions for [Mac](python-mac)
-   or [Ubuntu](python-ubuntu).
-
-2. `target-bigquery` can be run with any [Singer Tap], but we'll use [tap-exchangeratesapi] - which pulls currency
-   exchange rate data from a public data set - as an example. (Learn more
-   about [Exchangeratesapi.io](http://exchangeratesapi.io/))
-
-3. In the **target-config.json** file, enter the id of your GCP (Google Cloud Platform Project) - you can find it on the
-   Home page of your [GCP web console](https://console.cloud.google.com).
-
-Sample **target-config.json** file:
-
-```
+#### Minimal Configuration:
+```json
 {
-    "project_id": "{your project id}",
-    "dataset_id": "exchangeratesapi"
+    "project_id": "my-project",
+    "dataset_id": "my_dataset",
+    "google_storage_bucket": "my-bucket"
 }
 ```
 
-4. These commands will install `tap-exchangeratesapi` and `target-bigquery` with pip and then run them together, piping
-   the output of `tap-exchangeratesapi` to `target-bigquery`.
+#### Cross-Account Configuration (Production):
 
-We recommend that you **install tap and target in their own virtual environments.** It will be easier to manage
-requirements and avoid dependency conflicts.
+When BigQuery and Cloud Storage are in separate GCP projects/accounts:
 
-- The commands below are for running locally on a Windows machine. For a Mac or Linux machine, the syntax will be
-  slightly different.
-
-```bash
-cd "{your project root directory}"
-
-# upgrade pip
-# Windows:
-py -m pip install --upgrade pip 
-# Linux: 
-# python3 -m pip install --upgrade pip
-
-# create a virtual env for tap
-# Windows:
-py -m venv tap
-# Linux:
-# python3 -m venv /pyenv/tap
-
-# activate the virtual env and install tap 
-# Windows:
-.\tap\Scripts\activate && pip install tap-exchangeratesapi==0.1.1
-
-# create a virtual env for target
-# Windows: 
-py -m venv target
-# Linux:
-# python3 -m venv /pyenv/target
-
-# activate the virtual env and install target
-.\target\Scripts\activate && pip install git+git://github.com/adswerve/target-bigquery
-
-# load data
-
-{project_root_dir}\tap\Scripts\tap-exchangeratesapi --config sample_config/tap-config-exchange-rates-api.json | ^
-{project_root_dir}\target\Scripts\target-bigquery --config  sample_config/target-config-exchange-rates-api.json > sample_config/state.json
-# if directory has spaces, you can use quotes:
-# "{project root dir with spaces}\tap\Scripts\tap-exchangeratesapi" 
-# ^ on a Windows machine indicates a new line. On a Mac, use "\\".
+```json
+{
+    "project_id": "bigquery-project-123",
+    "dataset_id": "my_dataset",
+    "location": "US",
+    "google_storage_bucket": "my-staging-bucket",
+    "gcs_key_prefix": "singer-target/staging",
+    "storage_project_id": "storage-project-456",
+    "bigquery_credentials_path": "/path/to/bigquery-service-account.json",
+    "storage_credentials_path": "/path/to/storage-service-account.json"
+}
 ```
 
-- If you're using a different tap, substitute `tap-exchangeratesapi` in the final command above to the command used to
-  run your tap.
+**Notes:**
+- If `storage_project_id` is not specified, it defaults to `project_id`
+- If credential paths are not specified, the target falls back to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+- Both BigQuery and Storage service accounts need appropriate permissions:
+  - BigQuery service account: `BigQuery Data Editor` and `BigQuery Job User` roles
+  - Storage service account: `Storage Object Admin` role on the bucket
 
-### Step 5: target-tables-config file: set up partitioning and clustering
+⚠️ **WARNING**: We do not recommend using `incremental` replication method (which uses `MERGE` SQL statement). It might result in loss of production data, because historical records get updated. Instead, we recommend using the `append` replication method, which will preserve historical data.
 
-### Partitioning background
+#### CLI Flags
+
+The following command-line flags can override configuration file settings:
+
+- **`-c, --config`** (required): Path to main target configuration file
+- **`-t, --tables`**: Path to table configuration file (overrides `table_config` in main config)
+- **`-s, --state`**: Path to initial state file
+
+#### Environment Variables
+
+- **`GOOGLE_APPLICATION_CREDENTIALS`**: Path to Google Cloud service account JSON file
+- **`SYNC_TYPE`**: When set to `"full_sync"`, triggers truncate if `truncate_on_full_sync: true` in config
+
+### Table Configuration File
+
+Table-specific configurations can be provided via the `--tables` CLI flag or the `table_config` parameter in the main config file.
+
+#### Usage Options
+
+**Option 1: CLI Flag (Recommended)**
+```bash
+cat data.singer | ./target-bigquery \
+  --config sample_config/config.json  \
+  -t sample_config/target-tables-config.json > sample_config/state.json
+```
+
+**Option 2: Config File Parameter**
+Add `"table_config": "target-tables-config.json"` to your main target-config.json file.
+
+#### Supported Table-Level Properties
+
+**BigQuery Table Properties:**
+- **`partition_field`** (string|null): Field name for BigQuery time partitioning (DAY partitioning)
+- **`cluster_fields`** (array): List of field names for BigQuery clustering (max 4 fields)
+- **`force_fields`** (object): Schema field overrides for specific columns
+
+**Replication Method Overrides (Limited):**
+- **`truncate`** (boolean): Force truncate mode for this table (overrides global setting)
+- **`replication_method`** (string): Only `"truncate"` value is supported as table-level override
+
+⚠️ **IMPORTANT**: Table-level replication method overrides are **limited**. Only `truncate` can be overridden at the table level. Setting `replication_method` to `"append"` or `"incremental"` at the table level has **no effect** - the global replication method setting will be used instead.
+
+
+**Partitioning background**
 
 A [partitioned table](https://cloud.google.com/bigquery/docs/partitioned-tables) is a special table that is divided into
 segments, called partitions, that make it easier to manage and query your data. By dividing a large table into smaller
@@ -268,12 +261,10 @@ partitions, you can:
 You can partition BigQuery tables by:
 
 - Ingestion time: Tables are partitioned based on the data's ingestion (load) time or arrival time.
-
 - Date/timestamp/datetime: Tables are partitioned based on a TIMESTAMP, DATE, or DATETIME column.
-
 - Integer range: Tables are partitioned based on an integer column.
 
-### Clustering background
+**Clustering background**
 
 - When you create a clustered table in BigQuery, the table data is automatically organized based on the contents of one
   or more columns in the table’s schema.
@@ -284,39 +275,17 @@ You can partition BigQuery tables by:
   that aggregate data.
 - You can cluster up to 4 columns in a table
 
-**Learn more about BigQuery partitioned and clustered tables:**
 
-https://cloud.google.com/bigquery/docs/partitioned-tables
+#### Table Configuration Examples
 
-https://cloud.google.com/bigquery/docs/clustered-tables
-
-https://medium.com/google-cloud/bigquery-optimized-cluster-your-tables-65e2f684594b
-
-https://medium.com/analytics-vidhya/bigquery-partitioning-clustering-9f84fc201e61
-
-### Setting up partitioning and clustering
-
-**Example 1: [tap-recharge] data**
-
-This is not a follow-along example. Additional tap configuration would be required to run it. This example is just for
-illustration purposes.
-
-If we were to load [tap-recharge] *charges* table into BigQuery, we could partition it by date.
-
-For clustering, we can selected:
-
-- foreign keys and
-- columns likely to appear in `WHERE` and `GROUP BY` statements
-
-To configure partitioning and clustering in BigQuery destination tables, we create **target-tables-config.json**:
-
-```
+**Basic Partitioning and Clustering:**
+```json
 {
     "streams": {
-      "charges": {
-        "partition_field": "updated_at",
-        "cluster_fields": ["type", "status", "customer_id", "transaction_id"]
-      }
+        "charges": {
+            "partition_field": "updated_at",
+            "cluster_fields": ["type", "status", "customer_id", "transaction_id"]
+        }
     }
 }
 ```
@@ -325,56 +294,8 @@ We can verify in BigQuery web UI that partitioning and clustering worked:
 
 <img src="readme_screenshots/13_Partitioned_and_Clustered_Table.png" width="650" alt="Download the service account credential JSON file">
 
-**Example 2: [tap-exchangeratesapi] data**
+Load data data into BigQuery, while configuring target tables.
 
-You can follow along and try this example on your own. We will continue where we left off in **Step 4: Install and Run**
-above.
-
-1. Take a look at our [tap-exchangeratesapi] data. We have:
-
-- dates
-- datetimes
-- floats which show exchange rates
-
-<img src="readme_screenshots/11_Currency_Data.png" width="650" alt="Download the service account credential JSON file">
-
-<img src="readme_screenshots/12_Currency_Data.png" width="650" alt="Download the service account credential JSON file">
-
-In our [tap-exchangeratesapi] example, no columns are good candidates for clustering.
-
-You can only set up partitioning.
-
-2. Create your **target-tables-config.json** with partitioning configuration. Leave cluster fields blank:
-
-```
-{
-    "streams": {
-      "exchange_rate": {
-        "partition_field": "date",
-        "cluster_fields": []
-      }
-}}
-```
-
-3. Clear you **state.json**, so it's an empty JSON `{}`, because we want to load all data again. Skip this step, if you
-   didn't previously load this data in **Step 4** above.
-
-4. Delete your BigQuery destination table **exchangeratesapi**, because we want to re-load it again from scratch. Skip
-   this step, if you didn't previously load this data in **Step 4** above.
-
-3. Load data data into BigQuery, while configuring target tables. Pass **target-tables-config.json** as a command line
-   argument.
-
-```bash
-{project_root_dir}\tap\Scripts\tap-exchangeratesapi --config sample_config/tap-config-exchange-rates-api.json | ^
-{project_root_dir}\target\Scripts\target-bigquery --config  sample_config/target-config-exchange-rates-api.json ^
--t sample_config/target-tables-config-exchange-rates-api.json > sample_config/state.json
-```
-
-- "^" indicates a new line in Windows Command Prompt. In Mac terminal, use "\\".
-- If you don't want to pass **target-tables-config.json** file as a CLI argument, you can
-  add ```"table_config": "target-tables-config.json"``` to your **target-config.json** file. See **Step 3: Configure**
-  above.
 
 
 6. Verify in BigQuery web UI that partitioning and clustering worked (in our example below, we only set up
@@ -382,56 +303,28 @@ You can only set up partitioning.
 
 <img src="readme_screenshots/14_Partitioned_Table.png" width="650" alt="Download the service account credential JSON file">
 
-### Step 6: target-tables-config file: force data types and modes
+#### Schema Field Overrides (`force_fields`)
 
-#### Problem:
+**Problem:**
+- Normally, tap catalog file governs schema of data which will be loaded into target-bigquery
+- However, sometimes you can get a column of an undesired data type, which is not following your tap-catalog file
 
-- Normally, tap catalog file governs schema of data which will be loaded into target-bigquery.
-- However, sometimes you can get a column of an undesired data type, which is not following your tap-catalog file.
+**Solution:**
+- You can force that column to the desired data type by using `force_fields` flag inside your target-tables-config.json file
 
-#### Solution:
+**Example:**
+- We used this solution to fix `"date_start"` field from `"ads_insights_age_and_gender"` stream from tap-facebook
+- In tap catalog file, we said we wanted this column to be a **date**
+- However, the tap generates schema where this column is a **string**, despite our tap catalog file
+- Therefore, we used `force_fields` flag in target-tables-config.json to override what the tap generates and force the column to be a date
 
-- You can force that column to the desired data type by using `force_fields` flag inside your *
-  target-tables-config.json* file.
+**Supported Field Types:**
+- `STRING`, `INTEGER`, `FLOAT`, `BOOLEAN`, `TIMESTAMP`, `DATE`, `TIME`, `DATETIME`, `NUMERIC`, `BIGNUMERIC`, `BYTES`, `RECORD`, `GEOGRAPHY`
 
-#### Example:
-
-- We used this solution to fix `"date_start"` field from `"ads_insights_age_and_gender"` stream from tap-facebook.
-- In tap catalog file, we said we wanted this column to be a **date**.
-- However, the tap generates schema where this column is a **string**, despite our tap catalog file.
-- Therefore, we used `force_fields` flag in target-tables-config.json to override what the tap generates and force the
-  column to be a date.
-- Example of *target-tables-config.json* file:
-
-```
-{
-    "streams": {
-      "ads_insights_age_and_gender": {
-        "partition_field": "date_start",
-        "cluster_fields": ["age", "gender","account_id", "campaign_id"],
-        "force_fields": {
-          "date_start": {"type": "DATE", "mode":  "NULLABLE"},
-          "date_stop": {"type": "DATE", "mode":  "NULLABLE"}
-        }
-      }
-    }
-}
-```
-
-## Config files in this project
-
-This project has sample config files in the **sample_config** directory to illustrate points made in this README.
-
----
-
-[Singer Tap]: https://singer.io
-[Braintree]: https://github.com/singer-io/tap-braintree
-[Freshdesk]: https://github.com/singer-io/tap-freshdesk
-[Hubspot]: https://github.com/singer-io/tap-hubspot
-[tap-exchangeratesapi]: https://github.com/singer-io/tap-exchangeratesapi
-[python-mac]: http://docs.python-guide.org/en/latest/starting/install3/osx/
-[python-ubuntu]: https://www.digitalocean.com/community/tutorials/how-to-install-python-3-and-set-up-a-local-programming-environment-on-ubuntu-16-04
-[tap-recharge]: https://github.com/singer-io/tap-recharge
+**Supported Field Modes:**
+- `NULLABLE`: Field can contain null values (default)
+- `REQUIRED`: Field cannot contain null values
+- `REPEATED`: Field can contain multiple values (array)
 
 ## Note about BigQuery table/columns names
 

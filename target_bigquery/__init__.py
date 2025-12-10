@@ -1,144 +1,169 @@
 #!/usr/bin/env python3
-import os
+
 import argparse
 import io
 import json
+import os
+import singer
 import sys
 import traceback
 
-import singer
-
-from target_bigquery.encoders import DecimalEncoder
-from target_bigquery.process import process
-from target_bigquery.utils import emit_state, ensure_dataset
+from target_bigquery.config import TargetConfig, TablesConfig
+from target_bigquery.process import SingerProcessor
 from target_bigquery.state import State, LiteralState
+from target_bigquery.biquery_loader import BigQueryLoader
+
+from google.api_core import exceptions
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
 logger = singer.get_logger()
 
 
+def load_json_file(file_path: str, file_description: str = "file") -> dict:
+    """
+    Load and parse a JSON file with comprehensive error handling.
+
+    Args:
+        file_path: Path to the JSON file to load
+        file_description: Description of the file type for error messages
+
+    Returns:
+        Parsed JSON data as dictionary
+
+    Raises:
+        SystemExit: On any file loading or parsing error
+    """
+    try:
+        with open(file_path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.critical(f"{file_description.capitalize()} file not found: {file_path}")
+        sys.exit(2)
+    except json.JSONDecodeError as e:
+        logger.critical(f"Invalid JSON in {file_description} file {file_path}: {e}")
+        sys.exit(2)
+    except Exception as e:
+        logger.critical(f"Error reading {file_description} file {file_path}: {e}")
+        sys.exit(2)
+
+
+def emit_state(state):
+    """
+    Emit Singer state to stdout and optionally to a state file.
+
+    Writes the state as JSON to stdout (for Singer protocol compliance)
+    and also to a file if TARGET_BIGQUERY_STATE_FILE environment variable is set.
+
+    Args:
+        state: State object containing bookmarks and other state information
+    """
+    if state is not None:
+        line = json.dumps(state)
+        logger.debug(f"Emitting state: {line}")
+        sys.stdout.write("{}\n".format(line))
+        sys.stdout.flush()
+
+        if os.environ.get("TARGET_BIGQUERY_STATE_FILE", None):
+            fn = os.environ.get("TARGET_BIGQUERY_STATE_FILE", None)
+            with open(fn, "a") as f:
+                f.write("{}\n".format(line))
+
+
+def ensure_dataset(project_id, dataset_id, location, credentials=None):
+    """
+    Ensure BigQuery dataset exists, creating it if necessary.
+
+    Attempts to create the dataset and handles common error cases:
+    - 403 Forbidden: Log warning and continue (insufficient permissions)
+    - 409 Conflict: Continue silently (dataset already exists)
+    - Other errors: Log critical error and exit
+
+    Args:
+        project_id: Google Cloud project ID
+        dataset_id: BigQuery dataset ID to create/verify
+        location: Geographic location for the dataset (e.g., 'US')
+        credentials: Optional credentials object to use for authentication
+
+    Returns:
+        Tuple of (BigQuery client, Dataset reference)
+    """
+    client = bigquery.Client(project=project_id, location=location, credentials=credentials)
+
+    dataset_ref = bigquery.DatasetReference(project_id, dataset_id)
+    try:
+        client.create_dataset(dataset_ref)
+        logger.info(f"Successfully created BigQuery dataset: {dataset_id}")
+    except exceptions.GoogleAPICallError as e:
+        if e.response.status_code == 403:
+            logger.info(
+                f"Skipping dataset validation due to insufficient permissions - using dataset: {dataset_id}"
+            )
+        elif e.response.status_code == 409:  # dataset exists
+            logger.info(f"BigQuery dataset {dataset_id} already exists - continuing")
+        else:
+            logger.critical(
+                f"Failed to create BigQuery dataset {dataset_id} in project {project_id}: {e}"
+            )
+            raise
+
+    return client, bigquery.Dataset(dataset_ref)
+
+
 def main():
-    # parse command line arguments (e.g., target config file path, state, table config file path, process handler type)
-    parser = argparse.ArgumentParser()  # argparse.ArgumentParser(parents=[tools.argparser])
+    parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", help="Config file", required=True)
     parser.add_argument("-t", "--tables", help="Table configs file", required=False)
     parser.add_argument("-s", "--state", help="Initial state file", required=False)
-
-    # https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-    parser.add_argument('--merge_state_messages', help="Merge many state messages to construct a state file",
-                        dest='merge_state_messages', action='store_true')
-    parser.add_argument('--no-merge_state_messages',
-                        help="Don't merge many state messages into one message. The latest state message becomes the state file.",
-                        dest='merge_state_messages', action='store_false')
-    parser.set_defaults(merge_state_messages=None)
-    # default needs to be None. If it's None, it means it's not supplied and we need to check the config file
-    # if default is True here, then setting it in config file will not work
-    # in the config file, default will be True
-
-    parser.add_argument("-ph", "--processhandler",
-                        help="Defines the loading process. Partial loads by default.",
-                        required=False,
-                        choices=["load-job", "partial-load-job", "bookmarks-partial-load-job"],
-                        default="partial-load-job"
-                        )
-
     flags = parser.parse_args()
 
-    # read target-config file into a dict
-    with open(flags.config) as f:
-        config = json.load(f)
+    # Process target config file
+    config_dict = load_json_file(flags.config, "config")
+    config = TargetConfig(**config_dict)
 
-    # target tables config (e.g, partitioning and clustering)
-    table_config = flags.tables or config.get("table_config")
-    tables = {}
-    if table_config:
-        with open(table_config) as f:
-            tables = json.load(f)
+    # Process target tables config file
+    table_config_path = flags.tables or config.table_config
+    tables_config = TablesConfig()
+    if table_config_path:
+        tables_config_dict = load_json_file(table_config_path, "tables config")
+        tables_config = TablesConfig(**tables_config_dict)
 
-    # state
-    state = None
+    # Load initial state
+    initial_state = {}
     if flags.state is not None:
-        with open(flags.state) as f:
-            state = json.load(f)
+        initial_state = load_json_file(flags.state, "state")
 
-    # determine replication method: append, truncate or incremental
-    truncate = False
-    incremental = False
-    if config.get("replication_method", "append").lower() == "truncate" or (config.get("truncate_on_full_sync") and os.environ.get("SYNC_TYPE") == "full_sync"):
-        truncate = True
-    elif config.get("replication_method", "append").lower() == "incremental":
-        incremental = True
-
-    # arguments supplied in target config
-    table_prefix = config.get("table_prefix", "")
-    table_suffix = config.get("table_suffix", "")
-    location = config.get("location", "US")
-    validate_records = config.get("validate_records", True)
-    add_metadata_columns = config.get("add_metadata_columns", True)
-    force_alphanumeric_table_names = config.get("force_alphanumeric_table_names", False)
-
-    # we can pass merge state option via CLI param
-    merge_state_messages_cli = flags.merge_state_messages
-
-    # we can pass merge state option via config file per Meltano request
-    merge_state_messages_config = config.get("merge_state_messages", True)
-
-    # merge state option via CLI trumps one passed via config file
-    # we need to check if CLI option was passed at all. if not, we check the config file
-    merge_state_messages = merge_state_messages_cli if type(
-        merge_state_messages_cli) == bool else merge_state_messages_config
-
-    project_id, dataset_id = config["project_id"], config["dataset_id"]
-
-    table_configs = tables.get("streams", {})
-    max_cache = 1024 * 1024 * config.get("max_cache", 50)  # this is needed for partial loads
+    state_cls = State if config.merge_state_messages else LiteralState
+    state = state_cls(**initial_state)
 
     tap_stream = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
 
-    client, dataset = ensure_dataset(project_id, dataset_id, location)
-
-    try:
-        from target_bigquery.processhandler import LoadJobProcessHandler, PartialLoadJobProcessHandler, \
-            BookmarksStatePartialLoadJobProcessHandler
-
-        # determine type of process handler
-        ph = None
-
-        if flags.processhandler == "load-job":
-            ph = LoadJobProcessHandler
-        elif flags.processhandler == "partial-load-job":
-            ph = PartialLoadJobProcessHandler
-        elif flags.processhandler == "bookmarks-partial-load-job":
-            ph = BookmarksStatePartialLoadJobProcessHandler
-        else:
-            raise Exception("Unknown process handler.")
-
-        state_iterator = process(
-            ph,
-            tap_stream,
-            initial_state=state,
-            state_handler=State if merge_state_messages else LiteralState,
-            project_id=project_id,
-            dataset=dataset,
-            location=location,
-            truncate=truncate,
-            incremental=incremental,
-            validate_records=validate_records,
-            table_prefix=table_prefix,
-            table_suffix=table_suffix,
-            add_metadata_columns=add_metadata_columns,
-            table_configs=table_configs,
-            max_cache=max_cache,
-            force_alphanumeric_table_names=force_alphanumeric_table_names
+    # Load BigQuery credentials if specified
+    bq_credentials = None
+    if config.bigquery_credentials_path:
+        bq_credentials = service_account.Credentials.from_service_account_file(
+            config.bigquery_credentials_path
         )
 
-        # write a state file
-        for state in state_iterator:
-            emit_state(state)
+    ensure_dataset(config.project_id, config.dataset_id, config.location, bq_credentials)
+
+    try:
+        with SingerProcessor(config, tables_config, state) as processor:
+            process_result = processor.process(tap_stream)
+
+        BigQueryLoader(
+            config,
+            tables_config,
+            process_result
+        ).load()
+
+        emit_state(state)
 
     except Exception as e:
-        # load errors surface here
         exc_type, exc_value, exc_traceback = sys.exc_info()
-        logger.critical(repr(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+        logger.critical(
+            repr(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        )
         logger.critical(e)
         return 2  # sys.exit(2)
 
