@@ -253,8 +253,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
             table.schema = new_schema
             try:
                 table = self.client.update_table(table, ["schema"])
-            except:
+            except Exception as err:
                 self.logger.info(f"Error creating column in {self.tables[stream]}")
+                raise err
 
     def primary_key_condition(self, stream):
         key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
