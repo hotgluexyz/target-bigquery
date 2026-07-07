@@ -115,6 +115,19 @@ class BaseProcessHandler(object):
     def on_stream_end(self):
         yield from ()
 
+    def _replication_method_for_stream(self, stream):
+        stream_config = self.table_configs.get(stream, {})
+        stream_config_replication_method = stream_config.get("replication_method", '').lower()
+        if stream_config_replication_method in ["append", "truncate", "incremental"]:
+            return stream_config_replication_method
+        if stream_config.get("truncate", False):
+            return "truncate"
+        if self.incremental:
+            return "incremental"
+        if self.truncate:
+            return "truncate"
+        return "append"
+
     def _build_bq_schema_dict(self, schema):  # could move this to derived class but seems right to handle in base
         """
         Convert BigQuery schema as a list to BigQuery schema as a dictionary
@@ -312,8 +325,9 @@ class LoadJobProcessHandler(BaseProcessHandler):
             for stream, tmp_table_name in loaded_tmp_tables:
                 self.create_missing_columns(stream)
                 incremental_success = False
-                instance_truncate = self.truncate or self.table_configs.get(stream, {}).get("truncate", False) or self.table_configs.get(stream, {}).get("replication_method") == "truncate"
-                instance_increment = self.incremental if not instance_truncate else False
+                method = self._replication_method_for_stream(stream)
+                instance_truncate = method == "truncate"
+                instance_increment = method == "incremental"
 
                 key_properties = [create_valid_bigquery_name(k) for k in self.key_properties[stream]]
 
