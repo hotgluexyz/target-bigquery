@@ -15,7 +15,8 @@ from google.cloud.exceptions import NotFound
 from jsonschema.validators import validator_for
 
 from target_bigquery.encoders import DecimalEncoder
-from target_bigquery.schema import build_schema, cleanup_record, create_valid_bigquery_name, format_record_to_schema
+from target_bigquery.schema import build_schema, cleanup_record, create_valid_bigquery_name, \
+    format_record_to_schema, create_valid_bigquery_table_name
 
 from target_bigquery.simplify_json_schema import simplify
 from target_bigquery.validate_json_schema import validate_json_schema_completeness, \
@@ -86,9 +87,16 @@ class BaseProcessHandler(object):
                 self.table_prefix, msg.stream, self.table_suffix
             )
         
-        self.tables[msg.stream] = create_valid_bigquery_name(
-            self.tables[msg.stream]
-        ) if self.force_alphanumeric_table_names else self.tables[msg.stream]
+        # first perform the safe sanitization, only replace the invalid characters
+        # that would make the target fail
+        self.tables[msg.stream] = create_valid_bigquery_table_name(self.tables[msg.stream])
+
+        # if `force_alphanumeric_table_names` perform the more strict sanitization
+        # we kept this to keep the backward compatibility with the previous behavior
+        if self.force_alphanumeric_table_names:
+            self.tables[msg.stream] = create_valid_bigquery_name(
+                self.tables[msg.stream]
+            )
 
         self.schemas[msg.stream] = msg.schema
         validator_cls = validator_for(msg.schema)
@@ -293,7 +301,10 @@ class LoadJobProcessHandler(BaseProcessHandler):
         loaded_tmp_tables = []
         try:
             for stream in rows.keys():
-                tmp_table_name = "t_{}_{}".format(self.tables[stream], str(uuid.uuid4()).replace("-", ""))
+                # truncate the table name to 989 characters because BQ has table name
+                # limit of 1024 characters.
+                # So it's 989 + 3 (for the prefix) + 32 (for the random uuid) = 1024 max characters.
+                tmp_table_name = "t_{}_{}".format(self.tables[stream][:989], str(uuid.uuid4()).replace("-", ""))
 
                 job = self._load_to_bq(
                     client=self.client,
